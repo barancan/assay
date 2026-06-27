@@ -28,10 +28,18 @@ def _transition(report: Report, to_state: str, actor: str, note: str | None, s) 
 def _check_reviewer(actor: str, s) -> None:
     """Raise PermissionError unless actor has reviewer/admin role.
 
-    Solo-dev path: if the User table is empty, any named actor is trusted.
+    Open mode: if the User table is empty, any named actor is trusted (solo-dev path).
+    Enforced mode: never trust-when-empty; requires seeded reviewer accounts.
     """
+    from ..config import auth_mode
     total = s.query(User).count()
     if total == 0:
+        if auth_mode() == "enforced":
+            raise PermissionError(
+                "no reviewer accounts configured; "
+                "seed a reviewer before approving in enforced mode: "
+                "assay users --add <name> --role reviewer"
+            )
         return
     user = s.query(User).filter_by(name=actor).one_or_none()
     if user is None or user.role not in ("reviewer", "admin"):

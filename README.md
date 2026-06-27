@@ -85,13 +85,27 @@ generated check so you can exercise the adjudication and approval flow. See
 [`examples/compliance-copilot/README.md`](examples/compliance-copilot/README.md)
 for the full walkthrough.
 
-## Run it for a team
+## Run it for a team (enforced auth)
+
+By default Assay runs in open mode -- frictionless for a single developer.
+For a shared deployment, switch to enforced mode before exposing the port:
 
 ```bash
-docker compose up        # Postgres + Assay server at http://localhost:8000
-# or just the server:
-pip install 'assay-eval[server]' && assay serve
+# 1. Generate a signing key
+export ASSAY_SECRET_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
+
+# 2. Seed at least one reviewer (required before any approval in enforced mode)
+assay users --add alice --role reviewer
+
+# 3. Start with enforced auth
+ASSAY_AUTH=enforced assay serve --host 0.0.0.0
+# or via Docker Compose (ASSAY_SECRET_KEY must be set in your shell first):
+docker compose up
 ```
+
+In enforced mode the server refuses to start with the built-in dev secret, all
+privileged actions require a valid session or `X-Assay-User` header, and at
+least one reviewer account must exist before any approval goes through.
 
 ## How the build works
 

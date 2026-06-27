@@ -243,9 +243,31 @@ def pipeline_show(version_id: int = typer.Argument(..., help="PipelineVersion id
     console.print(f"rubrics:          {list(pv.rubrics.keys())}")
 
 
+_LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+
+
+def _nonloopback_warning(host: str) -> None:
+    """Print a warning to stderr when binding to a non-loopback address in open auth mode."""
+    import sys
+    from . import config
+    if host not in _LOOPBACK and config.auth_mode() == "open":
+        print(
+            "WARNING: serving on a non-loopback interface in open auth mode.\n"
+            "  Anyone who can reach this port can forge any identity, including admin.\n"
+            "  For team deployments set:\n"
+            "    ASSAY_AUTH=enforced\n"
+            "    ASSAY_SECRET_KEY=$(python -c \"import secrets; print(secrets.token_urlsafe(32))\")\n"
+            "  Then seed a reviewer: assay users --add <name> --role reviewer",
+            file=sys.stderr,
+        )
+
+
 @app.command()
 def serve(host: str = "127.0.0.1", port: int = 8000):
     """Run the review/approval web API."""
+    from . import config
+    config.enforce_posture_or_raise()
+    _nonloopback_warning(host)
     try:
         import uvicorn
     except ImportError:
