@@ -23,7 +23,36 @@ pipx install assay-eval          # or: pip install -e .
 # zero-install:  uvx --from assay-eval assay --help
 ```
 
-## 60-second quickstart
+## DB pipeline quickstart (recommended)
+
+Store the pipeline in the database, get version history, activation gates, and
+a full review UI — no files to commit.
+
+```bash
+pip install 'assay-eval[server]'
+
+# Import a spec from YAML into the DB and activate it
+assay pipeline import --spec assay.yaml --project my-project
+assay pipeline activate 1 --by you
+
+# Run against the active version
+assay run --pipeline-version 1
+
+# Start the review UI
+assay serve            # → http://localhost:8000
+```
+
+Open `http://localhost:8000` to see the review queue. From there you can
+assign reviewers, override individual case verdicts, and approve reports to
+lock them at `done`.
+
+Set `ASSAY_DB_URL=postgresql+psycopg://…` to switch from SQLite to Postgres
+with no code change.
+
+## File-based quickstart (backward-compatible)
+
+The original file-based path still works — `assay.yaml` + `generated/` live
+in your repo, diffable and version-pinned:
 
 ```bash
 assay init my-evals && cd my-evals          # scaffold + requirements.md stub
@@ -41,22 +70,30 @@ Reports are written to `.assay/reports/run_<id>/` as JSON, Markdown, and HTML.
 
 ```bash
 cd examples/compliance-copilot
+python run_via_db.py          # import → activate → run → submit for review
+assay serve                   # open http://localhost:8000/reports/1
+```
+
+Or the classic file-based path:
+
+```bash
+cd examples/compliance-copilot
 assay run --by alice
 cat .assay/reports/run_1/report.md
 ```
 
-It runs four cases against a mock target (one deliberately fails R3 via a
-sandboxed generated check), then you can exercise the approval gate.
+Four cases run against a mock target; one deliberately fails R3 via a
+sandboxed generated check so you can exercise the adjudication and approval
+flow. See [`examples/compliance-copilot/README.md`](examples/compliance-copilot/README.md)
+for the full walkthrough.
 
 ## Run it for a team
 
 ```bash
-docker compose up        # server + UI + Postgres + worker
-# or just the API:
+docker compose up        # Postgres + Assay server at http://localhost:8000
+# or just the server:
 pip install 'assay-eval[server]' && assay serve
 ```
-
-Set `ASSAY_DB_URL=postgresql://…` to switch SQLite → Postgres with no code change.
 
 ## How the build works
 
