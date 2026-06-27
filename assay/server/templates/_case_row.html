@@ -1,0 +1,50 @@
+<tr id="case-row-{{ cr.id }}">
+  <td>{{ cr.suite_id }}</td>
+  <td>
+    <details>
+      <summary>{{ cr.case_id }}</summary>
+      {% for chk in cr.checks %}
+      <div class="check-row">
+        <span class="{{ 'pass' if chk.get('passed') else 'fail' }}">{{ '✓' if chk.get('passed') else '✗' }}</span>
+        <strong>{{ chk.get('check_id', '') }}</strong>: {{ chk.get('message', '') }}
+        {% if chk.get('evidence') %}
+        <pre>{{ chk['evidence'] | tojson(indent=2) }}</pre>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </details>
+  </td>
+  <td>{{ cr.requirement_ref or '—' }}</td>
+  <td class="{{ 'pass' if cr.passed else 'fail' }}">{{ 'PASS' if cr.passed else 'FAIL' }}</td>
+  <td>
+    {% if cr.human_verdict %}
+      <span class="{{ 'pass' if cr.human_verdict == 'pass' else 'fail' }}">{{ cr.human_verdict.upper() }}</span>
+      {% if cr.overridden_by %}<small style="color:#888"> by {{ cr.overridden_by }}</small>{% endif %}
+    {% else %}
+      <span style="color:#aaa">—</span>
+    {% endif %}
+  </td>
+  <td class="{{ 'pass' if cr.effective_passed else 'fail' }}">{{ 'PASS' if cr.effective_passed else 'FAIL' }}</td>
+  <td style="white-space:nowrap">{{ "%.0f" | format(cr.latency_ms) }} ms</td>
+  <td>{{ cr.checks | length }}</td>
+  <td>
+    {% if not report_locked %}
+    <form class="adj-form"
+          hx-post="/reports/{{ report_id }}/cases/{{ cr.id }}/adjudicate"
+          hx-ext="json-enc"
+          hx-target="#case-row-{{ cr.id }}"
+          hx-swap="outerHTML"
+          hx-headers='{"X-Assay-User": {{ identity | tojson }}}'>
+      <select name="verdict">
+        <option value="">— clear —</option>
+        <option value="pass" {% if cr.human_verdict == 'pass' %}selected{% endif %}>pass</option>
+        <option value="fail" {% if cr.human_verdict == 'fail' %}selected{% endif %}>fail</option>
+      </select>
+      <input type="text" name="reason" placeholder="reason">
+      <button type="submit">Override</button>
+    </form>
+    {% else %}
+      <em style="color:#aaa;font-size:.85rem">locked</em>
+    {% endif %}
+  </td>
+</tr>
