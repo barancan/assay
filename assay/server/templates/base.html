@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Assay{% endblock %}</title>
+  <script src="https://unpkg.com/htmx.org@1.9.10" defer></script>
+  <script src="https://unpkg.com/alpinejs@3.13.10/dist/cdn.min.js" defer></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; color: #1a1a1a; background: #f8f9fa; }
+    nav { background: #1a1a2e; color: #fff; padding: .75rem 1.5rem; display: flex; gap: 1rem; align-items: center; }
+    nav a { color: #e0e0ff; text-decoration: none; font-weight: 600; }
+    nav a:hover { text-decoration: underline; }
+    main { padding: 1.5rem; max-width: 1200px; margin: 0 auto; }
+    h1, h2 { margin-top: 0; }
+    .badge { display: inline-block; padding: .2em .6em; border-radius: 4px; font-size: .8em; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+    .badge-pending { background: #ffc107; color: #333; }
+    .badge-ready_for_review { background: #17a2b8; color: #fff; }
+    .badge-done { background: #28a745; color: #fff; }
+    .meta { background: #fff; border-radius: 6px; padding: 1rem 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,.1); display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: .5rem 1.5rem; }
+    .meta dt { font-size: .8em; text-transform: uppercase; color: #666; margin: 0; }
+    .meta dd { margin: 0 0 .5rem; font-weight: 600; word-break: break-all; }
+    table { border-collapse: collapse; width: 100%; background: #fff; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+    th, td { padding: .6rem .9rem; text-align: left; border-bottom: 1px solid #dee2e6; vertical-align: top; }
+    th { background: #f1f3f5; font-size: .85em; text-transform: uppercase; letter-spacing: .05em; }
+    .pass { color: #28a745; font-weight: 700; }
+    .fail { color: #dc3545; font-weight: 700; }
+    details summary { cursor: pointer; padding: .2rem 0; }
+    pre { background: #f1f3f5; padding: .6rem; border-radius: 4px; overflow-x: auto; font-size: .8em; margin: .4rem 0 0; }
+    .check-row { margin: .3rem 0; font-size: .9em; }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="/">Assay</a>
+    {% block nav %}{% endblock %}
+  </nav>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

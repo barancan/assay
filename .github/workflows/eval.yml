@@ -1,0 +1,14 @@
+name: assay-eval
+on:
+  push:
+    paths: ["prompts/**", "model.config.*", "assay.yaml", "generated/**"]
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install assay-eval
+      - run: assay run --trigger ci --by github-actions
+      # Lands at ready_for_review; a human with reviewer authority approves to done.

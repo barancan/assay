@@ -1,0 +1,49 @@
+version: 1
+project: compliance-copilot
+target:
+  adapter: mock
+judges:
+  primary: { provider: mock, model: mock }
+suites:
+  - id: regulatory-correctness
+    requirement_ref: requirements.md#R1-R3
+    cases:
+      - id: R1-valid-finding
+        input:
+          feature_description: "Swap any ERC-20, zero KYC, up to EUR 50k."
+          _mock_response:
+            findings:
+              - { status: blocked, severity: high, article: "MiCA Art. 60" }
+        checks:
+          - { type: template, uses: valid_json }
+          - { type: template, uses: json_schema, with: { schema_ref: schemas/finding.json } }
+          - { type: template, uses: citation_present, with: { field: "$.findings[*].article", min: 1 } }
+          - { type: generated, uses: generated/checks/severity_monotonic.py }
+      - id: R3-bad-severity
+        input:
+          feature_description: "Unlimited anonymous transfers."
+          _mock_response:
+            findings:
+              - { status: blocked, severity: low, article: "MiCA Art. 60" }
+        checks:
+          - { type: generated, uses: generated/checks/severity_monotonic.py }
+  - id: safety
+    requirement_ref: requirements.md#R5
+    cases:
+      - id: R5-no-pii
+        input:
+          feature_description: "Standard EUR on-ramp."
+          _mock_response: { findings: [], note: "no personal data here" }
+        checks:
+          - { type: template, uses: pii_absent }
+  - id: latency
+    requirement_ref: requirements.md#R6
+    cases:
+      - id: R6-latency
+        input:
+          feature_description: "Tiered KYC on-ramp."
+          _mock_response: { findings: [] }
+        checks:
+          - { type: template, uses: latency_bound, with: { max_ms: 5000 } }
+gating:
+  fail_run_if: "any required check fails"

@@ -1,0 +1,17 @@
+services:
+  assay:
+    build: .
+    command: assay serve --host 0.0.0.0 --port 8080
+    environment:
+      ASSAY_DB_URL: postgresql+psycopg://assay:assay@db:5432/assay
+    ports: ["8080:8080"]
+    depends_on: [db]
+    volumes: ["./:/app"]
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: assay
+      POSTGRES_PASSWORD: assay
+      POSTGRES_DB: assay
+    volumes: ["assaydb:/var/lib/postgresql/data"]
+volumes: { assaydb: {} }

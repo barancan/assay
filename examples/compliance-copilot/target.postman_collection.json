@@ -1,0 +1,14 @@
+{
+  "info": {"name": "compliance-copilot", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+  "item": [
+    {
+      "name": "Analyze Feature",
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "url": "{{base_url}}/analyze",
+        "body": {"mode": "raw", "raw": "{\"feature_description\": \"{{feature_description}}\"}"}
+      }
+    }
+  ]
+}

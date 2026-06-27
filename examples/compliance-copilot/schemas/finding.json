@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "required": ["findings"],
+  "properties": {
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["status", "severity", "article"],
+        "properties": {
+          "status": {"enum": ["shippable", "mitigate", "blocked"]},
+          "severity": {"enum": ["low", "medium", "high", "critical"]},
+          "article": {"type": "string"}
+        }
+      }
+    }
+  }
+}
