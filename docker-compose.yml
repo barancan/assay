@@ -1,17 +1,36 @@
 services:
   assay:
     build: .
-    command: assay serve --host 0.0.0.0 --port 8080
+    ports: ["8000:8000"]
     environment:
+      # Required: Postgres connection string.
       ASSAY_DB_URL: postgresql+psycopg://assay:assay@db:5432/assay
-    ports: ["8080:8080"]
-    depends_on: [db]
-    volumes: ["./:/app"]
+      # Optional: sign session cookies (change in production).
+      ASSAY_SECRET_KEY: change-me-in-production
+      # Optional: Linear integration — set to enable issue creation.
+      # ASSAY_LINEAR_API_KEY: lin_api_...
+      # ASSAY_LINEAR_TEAM_ID: ...
+      # ASSAY_LINEAR_PROJECT_ID: ...
+    volumes:
+      - assayhome:/root/.assay
+    depends_on:
+      db:
+        condition: service_healthy
+
   db:
-    image: postgres:16
+    image: postgres:16-alpine
     environment:
       POSTGRES_USER: assay
       POSTGRES_PASSWORD: assay
       POSTGRES_DB: assay
-    volumes: ["assaydb:/var/lib/postgresql/data"]
-volumes: { assaydb: {} }
+    volumes:
+      - assaydb:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U assay"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  assaydb: {}
+  assayhome: {}

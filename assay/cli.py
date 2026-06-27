@@ -40,8 +40,8 @@ def generate(
     out: str = typer.Option("."),
     judge: str = typer.Option(None, help="provider:model for LLM-assisted build"),
     project: str = typer.Option("project"),
-    to_db: bool = typer.Option(False, "--to-db/--emit-files",
-                               help="store pipeline in DB (requires activation before running)"),
+    to_db: bool = typer.Option(False, "--to-db",
+                               help="store pipeline in DB instead of writing files to disk"),
     by: str = typer.Option(None, "--by", help="creator identity (DB path only)"),
 ):
     """Build the pipeline from requirements + target interface.
@@ -127,7 +127,7 @@ def users(add: str = typer.Option(None, help="name to add"),
 
 
 @app.command()
-def report(list_: bool = typer.Option(True, "--list/--no-list")):
+def report():
     """List reports and their states."""
     from .store import session_scope
     from .store.models import Report, Run
@@ -244,7 +244,7 @@ def pipeline_show(version_id: int = typer.Argument(..., help="PipelineVersion id
 
 
 @app.command()
-def serve(host: str = "127.0.0.1", port: int = 8080):
+def serve(host: str = "127.0.0.1", port: int = 8000):
     """Run the review/approval web API."""
     try:
         import uvicorn

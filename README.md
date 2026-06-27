@@ -1,20 +1,18 @@
-# Assay — an open-source eval-pipeline *builder*
+# Assay: an open-source eval-pipeline builder
 
 Point Assay at a deployed model (HTTP endpoint, MCP, or SDK), hand it your
 assessment requirements, and it **builds the eval pipeline for you**: it decides
-what to test, routes each test to the right *how* (deterministic template,
+what to test, routes each test to the right approach (deterministic template,
 sandboxed generated function, or LLM judge), runs it, and produces a saved,
-reviewable report that a named human must sign off before it's "production ready".
-
-This is the eval layer behind the compliance-copilot, generalised for anyone
-building or integrating models into an app.
+reviewable report that a named human must sign off before it is considered
+production ready.
 
 ## Why it exists
 
 - **Eval-as-code.** The pipeline (`assay.yaml` + `generated/`) lives in your repo, diffable and version-pinned.
-- **Three ways to test.** Vetted templates where a mechanical check fits; LLM-generated Python (sandboxed) where it doesn't; LLM judges for semantic calls.
+- **Three ways to test.** Vetted templates where a mechanical check fits; LLM-generated Python (sandboxed) where it does not; LLM judges for semantic calls.
 - **Provider-agnostic.** Targets and judges: Anthropic, OpenAI / OpenAI-compatible, Ollama, generic REST (Postman/OpenAPI import), and custom adapters.
-- **Auditable & gated.** Every run records the tested model + details, test cases, full responses, and the approver. Reports move `pending → ready_for_review → done`; automation can trigger runs but only a reviewer can promote to `done`.
+- **Auditable and gated.** Every run records the tested model, test cases, full responses, and the approver. Reports move `pending → ready_for_review → done`; automation can trigger runs but only a reviewer can promote to `done`.
 
 ## Install
 
@@ -23,7 +21,36 @@ pipx install assay-eval          # or: pip install -e .
 # zero-install:  uvx --from assay-eval assay --help
 ```
 
-## 60-second quickstart
+## DB pipeline quickstart (recommended)
+
+Store the pipeline in the database to get version history, activation gates, and
+a full review UI.
+
+```bash
+pip install 'assay-eval[server]'
+
+# Import a spec from YAML into the DB and activate it
+assay pipeline import --spec assay.yaml --project my-project
+assay pipeline activate 1 --by you
+
+# Run against the active version
+assay run --pipeline-version 1
+
+# Start the review UI
+assay serve            # http://localhost:8000
+```
+
+Open `http://localhost:8000` to see the review queue. From there you can
+assign reviewers, override individual case verdicts, and approve reports to
+lock them at `done`.
+
+Set `ASSAY_DB_URL=postgresql+psycopg://...` to switch from SQLite to Postgres
+with no code change.
+
+## File-based quickstart (backward-compatible)
+
+The original file-based path still works. `assay.yaml` and `generated/` live
+in your repo, diffable and version-pinned:
 
 ```bash
 assay init my-evals && cd my-evals          # scaffold + requirements.md stub
@@ -41,38 +68,46 @@ Reports are written to `.assay/reports/run_<id>/` as JSON, Markdown, and HTML.
 
 ```bash
 cd examples/compliance-copilot
+python3 run_via_db.py          # import, activate, run, submit for review
+assay serve                   # open http://localhost:8000/reports/1
+```
+
+Or the classic file-based path:
+
+```bash
+cd examples/compliance-copilot
 assay run --by alice
 cat .assay/reports/run_1/report.md
 ```
 
-It runs four cases against a mock target (one deliberately fails R3 via a
-sandboxed generated check), then you can exercise the approval gate.
+Four cases run against a mock target; one deliberately fails via a sandboxed
+generated check so you can exercise the adjudication and approval flow. See
+[`examples/compliance-copilot/README.md`](examples/compliance-copilot/README.md)
+for the full walkthrough.
 
 ## Run it for a team
 
 ```bash
-docker compose up        # server + UI + Postgres + worker
-# or just the API:
+docker compose up        # Postgres + Assay server at http://localhost:8000
+# or just the server:
 pip install 'assay-eval[server]' && assay serve
 ```
 
-Set `ASSAY_DB_URL=postgresql://…` to switch SQLite → Postgres with no code change.
-
 ## How the build works
 
-`requirements.md` + target interface → derive test intents → route
-deterministic vs. judge → materialise (template | generated function | rubric)
-→ generate cases → emit `assay.yaml` + `generated/` for **your review** before
-anything runs in production. See `assay-design.md` for the full design.
+`requirements.md` + target interface: derive test intents, route deterministic
+vs. judge, materialise (template | generated function | rubric), generate
+cases, emit `assay.yaml` + `generated/` for **your review** before anything
+runs in production. See `assay-design.md` for the full design.
 
 ## Sandbox honesty
 
-Generated checks are **pure functions of captured data** — they receive dicts,
+Generated checks are **pure functions of captured data** -- they receive dicts,
 never a model client. They run in an isolated subprocess with CPU/memory
-rlimits, a wall-clock timeout, an import allowlist (no `os`/`socket`/`subprocess`/…),
+rlimits, a wall-clock timeout, an import allowlist (no `os`/`socket`/`subprocess`/...),
 and `open` disabled. This contains buggy and naive-malicious checks. For
 genuinely untrusted third-party code, enable the hardened tier
-(gVisor / Firecracker / WASM) — see the design doc.
+(gVisor / Firecracker / WASM) -- see the design doc.
 
 ## Adapters
 
