@@ -33,7 +33,9 @@ pip install 'assay-eval[server]'
 
 ```bash
 cd examples/compliance-copilot
-python3 run_via_db.py
+python3 run_via_db.py       # if assay-eval is in the active env / venv
+# or specify the interpreter that has assay installed:
+python3.11 run_via_db.py
 ```
 
 This imports `assay.yaml`, activates the version, executes a run against the
