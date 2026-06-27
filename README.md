@@ -68,7 +68,7 @@ Reports are written to `.assay/reports/run_<id>/` as JSON, Markdown, and HTML.
 
 ```bash
 cd examples/compliance-copilot
-python run_via_db.py          # import, activate, run, submit for review
+python3 run_via_db.py          # import, activate, run, submit for review
 assay serve                   # open http://localhost:8000/reports/1
 ```
 

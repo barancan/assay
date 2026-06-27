@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Also runnable as: python3 run_via_db.py
 """End-to-end DB flow for the compliance-copilot example.
 
 Steps
