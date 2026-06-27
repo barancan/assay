@@ -8,7 +8,7 @@ license = { text = "Apache-2.0" }
 dependencies = [
     "pydantic>=2.6",
     "pyyaml>=6.0",
-    "typer>=0.12",
+    "typer>=0.13",
     "rich>=13.7",
     "jsonschema>=4.21",
     "jsonpath-ng>=1.6",
