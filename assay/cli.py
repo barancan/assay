@@ -244,7 +244,7 @@ def pipeline_show(version_id: int = typer.Argument(..., help="PipelineVersion id
 
 
 @app.command()
-def serve(host: str = "127.0.0.1", port: int = 8080):
+def serve(host: str = "127.0.0.1", port: int = 8000):
     """Run the review/approval web API."""
     try:
         import uvicorn
