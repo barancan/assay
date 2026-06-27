@@ -20,6 +20,9 @@ from ..store import session_scope, init_db
 from ..store.models import Report, Run, User, Pipeline, PipelineVersion
 from ..engine import approve_report, submit_for_review
 from ..reporting import export_report
+from .. import config as _config
+
+_config.enforce_posture_or_raise()
 
 app = FastAPI(title="Assay")
 init_db()
@@ -33,21 +36,31 @@ templates.env.filters["tojson"] = lambda v, indent=None: json.dumps(v, indent=in
 
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
-_SECRET = os.environ.get("ASSAY_SECRET_KEY", "assay-dev-secret")
-
 
 def _identity(request: Request) -> str:
+    """Resolve identity for display purposes. Always returns a string."""
     from itsdangerous import URLSafeSerializer, BadSignature
     cookie = request.cookies.get("assay_user")
     if cookie:
         try:
-            return URLSafeSerializer(_SECRET).loads(cookie)
+            return URLSafeSerializer(_config.secret_key()).loads(cookie)
         except (BadSignature, Exception):
             pass
     header = request.headers.get("x-assay-user")
     if header:
         return header
     return "anonymous"
+
+
+def _require_identity(request: Request, x_assay_user: str | None = None) -> str:
+    """Resolve identity for privileged actions; 401 in enforced mode if not authenticated."""
+    actor = x_assay_user or _identity(request)
+    if _config.auth_mode() == "enforced" and actor == "anonymous":
+        raise HTTPException(
+            401,
+            detail="authentication required: log in at /login or set X-Assay-User header",
+        )
+    return actor
 
 
 def _is_htmx(request: Request) -> bool:
@@ -158,7 +171,7 @@ def login_page(request: Request):
 @app.post("/login")
 def login_submit(username: str = Form(...)):
     from itsdangerous import URLSafeSerializer
-    signed = URLSafeSerializer(_SECRET).dumps(username)
+    signed = URLSafeSerializer(_config.secret_key()).dumps(username)
     response = RedirectResponse("/", status_code=303)
     response.set_cookie("assay_user", signed, httponly=True, samesite="strict")
     return response
@@ -292,7 +305,7 @@ def assign(
     x_assay_user: str | None = Header(default=None),
 ):
     from ..engine import assign_reviewer
-    actor = x_assay_user or _identity(request)
+    actor = _require_identity(request, x_assay_user)
     try:
         assign_reviewer(report_id, body.reviewer, actor)
     except PermissionError as e:
@@ -326,7 +339,7 @@ def adjudicate(
 ):
     from ..engine import adjudicate_case
     from ..store.models import CaseResult
-    actor = x_assay_user or _identity(request)
+    actor = _require_identity(request, x_assay_user)
     verdict = body.verdict if body.verdict else None   # normalise "" → None
     try:
         adjudicate_case(report_id, case_result_id, verdict, actor, body.reason)
@@ -403,7 +416,7 @@ def approve(
     request: Request,
     x_assay_user: str | None = Header(default=None),
 ):
-    actor = x_assay_user or _identity(request)
+    actor = _require_identity(request, x_assay_user)
     try:
         approve_report(report_id, actor)
     except PermissionError as e:

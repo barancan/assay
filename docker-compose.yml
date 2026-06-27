@@ -5,8 +5,12 @@ services:
     environment:
       # Required: Postgres connection string.
       ASSAY_DB_URL: postgresql+psycopg://assay:assay@db:5432/assay
-      # Optional: sign session cookies (change in production).
-      ASSAY_SECRET_KEY: change-me-in-production
+      # Enforced auth mode: reject forged cookies and unseeded approvers.
+      ASSAY_AUTH: enforced
+      # Required in enforced mode: generate with:
+      #   python -c "import secrets; print(secrets.token_urlsafe(32))"
+      # then export ASSAY_SECRET_KEY=<value> before running docker compose up.
+      ASSAY_SECRET_KEY: "${ASSAY_SECRET_KEY:?Set ASSAY_SECRET_KEY before starting. Generate with: python -c 'import secrets; print(secrets.token_urlsafe(32))'}"
       # Optional: Linear integration — set to enable issue creation.
       # ASSAY_LINEAR_API_KEY: lin_api_...
       # ASSAY_LINEAR_TEAM_ID: ...
