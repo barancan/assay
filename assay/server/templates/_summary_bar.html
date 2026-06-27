@@ -1,0 +1,8 @@
+<div id="summary-bar"
+     hx-get="/reports/{{ report_id }}/effective-summary"
+     hx-trigger="summaryChanged from:body"
+     hx-swap="outerHTML">
+  <span><strong>{{ summary.get('cases', 0) }}</strong> cases</span>
+  <span class="pass"><strong>{{ summary.get('passed', 0) }}</strong> passed</span>
+  <span class="{{ 'fail' if summary.get('failed', 0) else '' }}"><strong>{{ summary.get('failed', 0) }}</strong> failed</span>
+</div>

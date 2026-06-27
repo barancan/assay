@@ -1,72 +1,118 @@
 {% extends "base.html" %}
-{% block title %}Report #{{ report_id }} — Assay{% endblock %}
+{% block title %}Report #{{ report_id }} — {{ run_project }} — Assay{% endblock %}
 
 {% block content %}
-<h1>
-  Report #{{ report_id }}
+
+{% if report_locked %}
+<div class="banner-locked">This report has been approved and is locked.</div>
+{% endif %}
+
+<div class="page-header">
+  <h1>Report #{{ report_id }}</h1>
   <span class="badge badge-{{ report_state }}">{{ report_state }}</span>
-</h1>
+</div>
 
 <dl class="meta">
   <div><dt>Project</dt><dd>{{ run_project }}</dd></div>
   <div><dt>Run</dt><dd>#{{ run_id }}</dd></div>
+  <div><dt>Triggered by</dt><dd>{{ run_triggered_by or '—' }}</dd></div>
   <div><dt>Target</dt><dd>{{ target_adapter }}{% if target_model %} / {{ target_model }}{% endif %}</dd></div>
   {% if target_endpoint %}<div><dt>Endpoint</dt><dd>{{ target_endpoint }}</dd></div>{% endif %}
   {% if pipeline_version %}
   <div><dt>Pipeline version</dt><dd>#{{ pipeline_version.id }} (v{{ pipeline_version.version_number }})</dd></div>
-  <div><dt>Content hash</dt><dd style="font-family:monospace;font-size:.85em">{{ pipeline_version.content_hash[:12] }}…</dd></div>
+  <div><dt>Content hash</dt><dd><code>{{ pipeline_version.content_hash[:12] }}…</code></dd></div>
   {% endif %}
   {% if report_approved_by %}<div><dt>Approved by</dt><dd>{{ report_approved_by }}</dd></div>{% endif %}
-  <div><dt>Triggered by</dt><dd>{{ run_triggered_by }}</dd></div>
 </dl>
 
-{% if report_summary %}
-<p>
-  <strong>{{ report_summary.get('cases', 0) }} cases</strong> —
-  <span class="pass">{{ report_summary.get('passed', 0) }} passed</span>,
-  <span class="fail">{{ report_summary.get('failed', 0) }} failed</span>
-</p>
+{% with summary = report_summary %}
+{% include "_summary_bar.html" %}
+{% endwith %}
+
+<!-- Reviewer assignment -->
+<div class="card">
+  <h2 style="margin-bottom:.75rem">Reviewer</h2>
+  <div id="assigned-reviewer-section">
+    <strong>Assigned to:</strong>
+    {{ assigned_reviewer or '—' }}
+  </div>
+  {% if not report_locked %}
+  <form style="margin-top:.75rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap"
+        hx-post="/reports/{{ report_id }}/assign"
+        hx-ext="json-enc"
+        hx-target="#assigned-reviewer-section"
+        hx-swap="outerHTML"
+        hx-headers='{"X-Assay-User": {{ identity | tojson }}}'>
+    {% if reviewer_options %}
+    <select name="reviewer">
+      <option value="">— select reviewer —</option>
+      {% for u in reviewer_options %}
+      <option value="{{ u.name }}">{{ u.name }} ({{ u.role }})</option>
+      {% endfor %}
+    </select>
+    {% else %}
+    <input type="text" name="reviewer" placeholder="reviewer username" style="width:16rem">
+    {% endif %}
+    <button type="submit">Assign</button>
+  </form>
+  {% endif %}
+</div>
+
+<!-- Approve -->
+{% if not report_locked and report_state == 'ready_for_review' %}
+<div class="card" style="padding:.75rem 1.5rem">
+  <form method="post" action="/reports/{{ report_id }}/approve" style="display:inline">
+    <button type="submit" class="btn-approve">Approve &amp; lock report</button>
+  </form>
+</div>
 {% endif %}
 
-<h2>Cases</h2>
-<table>
-  <thead>
-    <tr>
-      <th>Suite</th>
-      <th>Case</th>
-      <th>Req ref</th>
-      <th>Result</th>
-      <th>Latency (ms)</th>
-      <th>Checks</th>
-    </tr>
-  </thead>
-  <tbody>
-  {% for cr in case_results %}
-    <tr>
-      <td>{{ cr.suite_id }}</td>
-      <td>
-        <details>
-          <summary>{{ cr.case_id }}</summary>
-          {% for chk in cr.checks %}
-          <div class="check-row">
-            <span class="{{ 'pass' if chk.get('passed') else 'fail' }}">
-              {{ '✓' if chk.get('passed') else '✗' }}
-            </span>
-            <strong>{{ chk.get('check_id', '') }}</strong>:
-            {{ chk.get('message', '') }}
-            {% if chk.get('evidence') %}
-            <pre>{{ chk['evidence'] | tojson(indent=2) }}</pre>
-            {% endif %}
-          </div>
-          {% endfor %}
-        </details>
-      </td>
-      <td>{{ cr.requirement_ref or '—' }}</td>
-      <td class="{{ 'pass' if cr.passed else 'fail' }}">{{ 'PASS' if cr.passed else 'FAIL' }}</td>
-      <td>{{ "%.0f" | format(cr.latency_ms) }}</td>
-      <td>{{ cr.checks | length }}</td>
-    </tr>
+<!-- Cases -->
+<div class="card" style="padding:1rem 0;overflow-x:auto">
+  <h2 style="padding:0 1.5rem;margin-bottom:.75rem">Cases</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Suite</th>
+        <th>Case</th>
+        <th>Req ref</th>
+        <th>Machine</th>
+        <th>Human</th>
+        <th>Effective</th>
+        <th>Latency</th>
+        <th>Checks</th>
+        <th>Adjudicate</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for cr in case_results %}
+      {% include "_case_row.html" %}
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Generated sources -->
+{% if generated_sources %}
+<div class="card">
+  <h2>Generated check sources</h2>
+  {% for path, src in generated_sources.items() %}
+  <details style="margin-bottom:.75rem">
+    <summary><code>{{ path }}</code></summary>
+    <pre>{{ src }}</pre>
+  </details>
   {% endfor %}
-  </tbody>
-</table>
+</div>
+{% endif %}
+
+<!-- Exports -->
+<div class="card">
+  <h2>Exports</h2>
+  <div style="display:flex;gap:.75rem;flex-wrap:wrap">
+    <a href="/reports/{{ report_id }}/export/json"><button>Download JSON</button></a>
+    <a href="/reports/{{ report_id }}/export/md"><button>Download Markdown</button></a>
+    <a href="/reports/{{ report_id }}/export/html"><button>Download HTML</button></a>
+  </div>
+</div>
+
 {% endblock %}
