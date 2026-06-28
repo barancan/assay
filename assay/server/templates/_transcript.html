@@ -1,0 +1,32 @@
+<div style="padding:.75rem;font-size:13px">
+  <div style="margin-bottom:.75rem">
+    <h4 style="font-size:12px;font-weight:600;letter-spacing:.04em;color:var(--text-muted);text-transform:uppercase;margin:0 0 .35rem">Input</h4>
+    <pre style="background:var(--surface-2);border-radius:var(--radius);padding:.75rem;overflow-x:auto;margin:0;font-size:12px">{{ cr_request | clean_request | tojson(indent=2) }}</pre>
+  </div>
+  <div style="margin-bottom:.75rem">
+    <h4 style="font-size:12px;font-weight:600;letter-spacing:.04em;color:var(--text-muted);text-transform:uppercase;margin:0 0 .35rem">Output</h4>
+    <pre style="background:var(--surface-2);border-radius:var(--radius);padding:.75rem;overflow-x:auto;margin:0;font-size:12px">{{ cr_response | tojson(indent=2) }}</pre>
+  </div>
+  <div>
+    <h4 style="font-size:12px;font-weight:600;letter-spacing:.04em;color:var(--text-muted);text-transform:uppercase;margin:0 0 .35rem">Checks</h4>
+    {% for chk in checks %}
+    <div style="display:flex;gap:.5rem;align-items:flex-start;padding:.3rem 0;border-bottom:1px solid var(--border);font-size:13px">
+      {% if chk.get('passed') %}
+        <i class="ti ti-circle-check" style="color:var(--text-success);flex-shrink:0;margin-top:.1rem" aria-hidden="true"></i>
+      {% else %}
+        <i class="ti ti-circle-x" style="color:var(--text-danger);flex-shrink:0;margin-top:.1rem" aria-hidden="true"></i>
+      {% endif %}
+      <div style="flex:1">
+        <strong>{{ chk.get('check_id', chk.get('uses', '?')) }}</strong>
+        {% if chk.get('message') %} — {{ chk['message'] }}{% endif %}
+        {% if chk.get('evidence') %}
+        <details style="margin-top:.25rem">
+          <summary style="font-size:12px;color:var(--text-muted);cursor:pointer">Evidence</summary>
+          <pre style="background:var(--surface-2);border-radius:var(--radius);padding:.5rem;font-size:11px;overflow-x:auto;margin-top:.25rem">{{ chk['evidence'] | tojson(indent=2) }}</pre>
+        </details>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>

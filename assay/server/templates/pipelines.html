@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Pipelines — Assay{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 style="margin:0">Pipelines</h1>
+  <a href="/pipelines/new" class="btn btn-primary">
+    <i class="ti ti-plus" aria-hidden="true"></i> New pipeline
+  </a>
+</div>
+
+{% if drafts %}
+<div class="card" style="padding:0;overflow-x:auto">
+  <table>
+    <thead>
+      <tr>
+        <th>Pipeline</th>
+        <th>Project</th>
+        <th>Step reached</th>
+        <th>Last edited</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for d in drafts %}
+      <tr id="pipeline-version-row-{{ d.id }}">
+        <td>
+          <strong style="font-size:14px">{{ d.pipeline_name }}</strong>
+          <div style="font-size:12px;color:var(--text-muted)">v{{ d.version_number }} · draft</div>
+        </td>
+        <td style="font-size:13px;color:var(--text-secondary)">{{ d.project }}</td>
+        <td>
+          {% set step = d.step_reached or 'define' %}
+          {% if step == 'review' %}
+            <span class="badge badge-accent">Review</span>
+          {% elif step == 'connect' %}
+            <span class="badge badge-warning">Connect</span>
+          {% else %}
+            <span class="badge badge-pending">Define</span>
+          {% endif %}
+        </td>
+        <td class="meta-date">{{ d.created_at }}</td>
+        <td style="white-space:nowrap;display:flex;gap:.25rem;align-items:center">
+          <a href="/pipelines/new?resume={{ d.id }}" class="btn btn-ghost"
+             style="font-size:13px;padding:.25rem .5rem">
+            <i class="ti ti-player-play" aria-hidden="true"></i> Resume
+          </a>
+          <button class="btn btn-ghost"
+                  style="font-size:13px;padding:.25rem .5rem;color:var(--text-danger)"
+                  hx-delete="/pipelines/versions/{{ d.id }}"
+                  hx-target="#pipeline-version-row-{{ d.id }}"
+                  hx-swap="outerHTML"
+                  hx-confirm="Delete this draft pipeline?">
+            <i class="ti ti-trash" aria-hidden="true"></i>
+          </button>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card" style="text-align:center;padding:3rem 1.5rem">
+  <i class="ti ti-git-branch" style="font-size:2.5rem;color:var(--text-muted);display:block;margin-bottom:.75rem" aria-hidden="true"></i>
+  <p style="color:var(--text-secondary);margin:0 0 .5rem;font-size:15px;font-weight:500">No draft pipelines</p>
+  <p style="color:var(--text-muted);font-size:13px;margin:0">Create a new pipeline to get started.</p>
+  <a href="/pipelines/new" class="btn btn-primary" style="margin-top:1rem">
+    <i class="ti ti-plus" aria-hidden="true"></i> New pipeline
+  </a>
+</div>
+{% endif %}
+
+{% endblock %}

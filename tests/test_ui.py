@@ -135,7 +135,8 @@ def test_approve_via_ui(client):
 
     resp2 = client.get(location)
     assert resp2.status_code == 200
-    assert "done" in resp2.text
+    # New UI uses sentence case ("Done") and a locked banner
+    assert "Done" in resp2.text or "locked" in resp2.text
 
 
 # ── Locked report rejects adjudication ────────────────────────────────────

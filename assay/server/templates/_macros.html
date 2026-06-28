@@ -1,0 +1,45 @@
+{% macro card(class="") %}
+<div class="card {{ class }}">{{ caller() }}</div>
+{% endmacro %}
+
+{% macro badge(text, variant="neutral") %}
+<span class="badge badge-{{ variant }}">{{ text }}</span>
+{% endmacro %}
+
+{% macro state_badge(state) %}
+{% if state == 'ready_for_review' %}
+<span class="badge badge-ready_for_review">Ready for review</span>
+{% elif state == 'done' %}
+<span class="badge badge-done">Done</span>
+{% elif state == 'pending' %}
+<span class="badge badge-pending">Pending</span>
+{% elif state == 'draft' %}
+<span class="badge badge-draft">Draft</span>
+{% else %}
+<span class="badge badge-neutral">{{ state }}</span>
+{% endif %}
+{% endmacro %}
+
+{% macro verdict_badge(verdict) %}
+{% if verdict == 'pass' %}
+<span class="badge badge-pass"><i class="ti ti-circle-check" aria-hidden="true"></i> Pass</span>
+{% elif verdict == 'fail' %}
+<span class="badge badge-fail"><i class="ti ti-circle-x" aria-hidden="true"></i> Fail</span>
+{% else %}
+<span class="badge badge-neutral">—</span>
+{% endif %}
+{% endmacro %}
+
+{% macro check_type_badge(type) %}
+{% if type == 'generated' %}
+<span class="badge badge-generated">Generated</span>
+{% elif type == 'judge' %}
+<span class="badge badge-judge">Judge</span>
+{% else %}
+<span class="badge badge-template">Template</span>
+{% endif %}
+{% endmacro %}
+
+{% macro filter_bar() %}
+<div class="filter-bar">{{ caller() }}</div>
+{% endmacro %}

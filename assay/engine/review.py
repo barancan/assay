@@ -67,6 +67,76 @@ def _fire(event: str, payload: dict) -> None:
                          event, payload.get("report_id"))
 
 
+def compute_suggested_verdict(report_id: int, s=None) -> str:
+    """Compute suggested verdict from pass policy and current effective case results."""
+    def _compute(session):
+        rep = session.get(Report, report_id)
+        run = session.get(Run, rep.run_id)
+        cases = session.query(CaseResult).filter_by(run_id=run.id).all()
+        pv = session.get(PipelineVersion, run.pipeline_version_id) if run.pipeline_version_id else None
+        policy: dict = {}
+        if pv and isinstance(pv.config, dict):
+            policy = pv.config.get("pass_policy", {})
+        policy_type = policy.get("type", "all_required")
+        if policy_type == "threshold":
+            threshold = float(policy.get("value", 1.0))
+            if not cases:
+                return "pass"
+            rate = sum(1 for cr in cases if cr.effective_passed) / len(cases)
+            return "pass" if rate >= threshold else "fail"
+        elif policy_type == "must_pass_tags":
+            tags = set(policy.get("tags", []))
+            tagged = [cr for cr in cases if cr.requirement_ref in tags]
+            if not tagged:
+                return "pass"
+            return "pass" if all(cr.effective_passed for cr in tagged) else "fail"
+        else:  # all_required (default)
+            return "pass" if all(cr.effective_passed for cr in cases) else "fail"
+
+    if s is not None:
+        return _compute(s)
+    with session_scope() as s2:
+        return _compute(s2)
+
+
+def _apply_verdict(report_id: int, verdict: str, reason: str, actor: str) -> None:
+    """Internal: transition to done, set verdict columns, lock. No reason validation."""
+    payload: dict = {}
+    with session_scope() as s:
+        _check_reviewer(actor, s)
+        rep = s.get(Report, report_id)
+        _recompute_summary(report_id, s)
+        _transition(rep, "done", actor, reason or None, s)
+        now = dt.datetime.now(dt.timezone.utc)
+        rep.approved_by = actor
+        rep.approved_at = now
+        rep.locked = True
+        rep.verdict = verdict if verdict else "pass"
+        rep.verdict_reason = reason or None
+        rep.verdict_set_by = actor
+        rep.verdict_set_at = now
+        run = s.get(Run, rep.run_id)
+        payload = {
+            "event": "approved",
+            "report_id": rep.id,
+            "run_id": run.id,
+            "project": run.project,
+            "approved_by": actor,
+            "verdict": rep.verdict,
+            "summary": dict(rep.summary),
+        }
+    _fire("approved", payload)
+
+
+def set_verdict(report_id: int, verdict: str, reason: str, actor: str) -> None:
+    """Set report-level verdict and lock. Requires reviewer/admin and non-empty reason."""
+    if verdict not in ("pass", "fail"):
+        raise ValueError(f"verdict must be 'pass' or 'fail', got {verdict!r}")
+    if not reason or not reason.strip():
+        raise ValueError("reason required")
+    _apply_verdict(report_id, verdict, reason, actor)
+
+
 def submit_for_review(report_id: int, actor: str = "cli", note: str | None = None) -> None:
     payload: dict = {}
     with session_scope() as s:
@@ -97,26 +167,8 @@ def submit_for_review(report_id: int, actor: str = "cli", note: str | None = Non
 
 
 def approve_report(report_id: int, approver: str, note: str | None = None) -> None:
-    """Promote to `done`. Requires reviewer/admin authority (solo-dev: any actor)."""
-    payload: dict = {}
-    with session_scope() as s:
-        _check_reviewer(approver, s)
-        rep = s.get(Report, report_id)
-        _recompute_summary(report_id, s)
-        _transition(rep, "done", approver, note, s)
-        rep.approved_by = approver
-        rep.approved_at = dt.datetime.now(dt.timezone.utc)
-        rep.locked = True
-        run = s.get(Run, rep.run_id)
-        payload = {
-            "event": "approved",
-            "report_id": rep.id,
-            "run_id": run.id,
-            "project": run.project,
-            "approved_by": approver,
-            "summary": dict(rep.summary),
-        }
-    _fire("approved", payload)
+    """Backwards-compat alias → lock report as 'pass'. No reason enforcement."""
+    _apply_verdict(report_id, "pass", note or "", approver)
 
 
 def assign_reviewer(report_id: int, reviewer: str, actor: str) -> None:
@@ -158,6 +210,9 @@ def adjudicate_case(
             raise PermissionError("report is locked")
         if rep.state != "ready_for_review":
             raise ValueError(f"report is not ready_for_review (state: {rep.state})")
+
+        if verdict is not None and not reason:
+            raise ValueError("reason required when setting a verdict")
 
         cr = s.get(CaseResult, case_result_id)
         if cr is None or cr.run_id != rep.run_id:

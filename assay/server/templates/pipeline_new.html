@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+{% block title %}New pipeline — Assay{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <a href="/pipelines" class="btn btn-ghost" style="padding:.3rem .5rem;font-size:13px">
+    <i class="ti ti-arrow-left" aria-hidden="true"></i> Pipelines
+  </a>
+  <h1 style="margin:0">New pipeline</h1>
+</div>
+
+<div x-data="{
+  step: 1,
+  requirements: {{ (resume_data.requirements if resume_data else '') | tojson }},
+  project: {{ (resume_data.project if resume_data else '') | tojson }},
+  name: {{ (resume_data.name if resume_data else '') | tojson }},
+  adapter: 'mock',
+  model: '',
+  endpoint: '',
+  key_env: '',
+  judgeAdapter: {{ judge_adapter | tojson }},
+  judgeModel: {{ judge_model | tojson }},
+  preview: null,
+  hasJudge() {
+    return this.preview ? this.preview.checks.some(c => c.type === 'judge') : false;
+  },
+  toggleTemplate(text) {
+    if (this.requirements.includes(text)) {
+      this.requirements = this.requirements.replace('\n' + text, '').replace(text + '\n', '').replace(text, '').trim();
+    } else {
+      this.requirements = this.requirements ? this.requirements + '\n' + text : text;
+    }
+  },
+  async loadPreview() {
+    const r = await fetch('/pipelines/preview', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({requirements: this.requirements, adapter: this.adapter})
+    });
+    this.preview = await r.json();
+  },
+  async generate() {
+    const r = await fetch('/pipelines/generate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        project: this.project, name: this.name, requirements: this.requirements,
+        adapter_spec: {adapter: this.adapter, model: this.model || null,
+                       endpoint: this.endpoint || null, key_env: this.key_env || null}
+      })
+    });
+    const d = await r.json();
+    if (d.pipeline_version_id) { window.location.href = '/pipelines'; }
+  },
+  async saveDraft(s) {
+    if (!this.requirements || !this.project || !this.name) return;
+    await fetch('/pipelines/save-draft', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({project: this.project, name: this.name,
+                            requirements: this.requirements, step: s})
+    });
+  }
+}">
+
+  <!-- Step tabs -->
+  <div style="display:flex;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:1.25rem">
+    {% for label in ['Define', 'Connect', 'Review', 'Run'] %}
+    {% set n = loop.index %}
+    <div style="flex:1;padding:.5rem .75rem;font-size:13px;font-weight:500;text-align:center;background:var(--surface-1)"
+         :style="step === {{ n }} ? 'background:var(--bg-accent);color:var(--text-accent)' : 'color:var(--text-muted)'">
+      {{ n }} · {{ label }}
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Step 1: Define -->
+  <div x-show="step === 1">
+    <div class="card">
+      <h2 style="margin:0 0 .5rem">What should your model do?</h2>
+      <p style="font-size:14px;color:var(--text-muted);margin:0 0 .75rem">
+        Describe requirements in plain English or pick starter templates.
+      </p>
+      <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.75rem">
+        {% for t in starter_templates %}
+        <button type="button"
+                class="badge"
+                :class="requirements.includes({{ t.text | tojson }}) ? 'badge-accent' : 'badge-neutral'"
+                style="cursor:pointer;border:1px solid var(--border);font-size:13px"
+                @click="toggleTemplate({{ t.text | tojson }})">
+          {{ t.label }}
+        </button>
+        {% endfor %}
+      </div>
+      <textarea x-model="requirements" rows="7" style="width:100%;resize:vertical"
+                placeholder="e.g. The response must be valid JSON.&#10;No PII in the output."></textarea>
+      <div style="display:flex;gap:.75rem;margin-top:.75rem;flex-wrap:wrap">
+        <div style="flex:1;min-width:9rem">
+          <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Project</label>
+          <input x-model="project" type="text" placeholder="my-project" style="width:100%">
+        </div>
+        <div style="flex:1;min-width:9rem">
+          <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Pipeline name</label>
+          <input x-model="name" type="text" placeholder="my-pipeline" style="width:100%">
+        </div>
+      </div>
+      <div style="display:flex;gap:.5rem;margin-top:1rem;justify-content:flex-end">
+        <button type="button" class="btn btn-ghost"
+                @click="saveDraft('define')">
+          <i class="ti ti-device-floppy" aria-hidden="true"></i> Save draft
+        </button>
+        <button type="button" class="btn btn-primary"
+                :disabled="!requirements.trim() || !project.trim() || !name.trim()"
+                @click="loadPreview(); step = 2">
+          Continue <i class="ti ti-arrow-right" aria-hidden="true"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 2: Connect -->
+  <div x-show="step === 2">
+    <div class="card">
+      <h2 style="margin:0 0 .75rem">Connect your model</h2>
+      {% include "_adapter_fields.html" %}
+      <div style="margin-top:.75rem;display:flex;gap:.5rem;align-items:center">
+        <button type="button" class="btn"
+                hx-post="/connection-test"
+                hx-ext="json-enc"
+                :hx-vals='JSON.stringify({adapter, model: model || null, endpoint: endpoint || null, key_env: key_env || null})'
+                hx-target="#connection-result"
+                hx-swap="outerHTML">
+          <i class="ti ti-plug" aria-hidden="true"></i> Test connection
+        </button>
+        <span id="connection-result" style="font-size:13px;color:var(--text-muted)"></span>
+      </div>
+    </div>
+
+    <!-- Live preview card -->
+    <div class="card" x-show="preview">
+      <h2 style="margin:0 0 .75rem">
+        <i class="ti ti-eye" aria-hidden="true"></i> Pipeline preview
+      </h2>
+      <template x-if="preview">
+        <div>
+          <p style="font-size:14px;color:var(--text-secondary);margin:0 0 .75rem">
+            Assay will build <strong x-text="preview.checks.length"></strong> checks
+            (~<span x-text="preview.estimated_minutes"></span> min to first report).
+          </p>
+          <div style="display:flex;flex-direction:column;gap:.35rem">
+            <template x-for="c in preview.checks" :key="c.id">
+              <div style="display:flex;gap:.5rem;align-items:center;font-size:13px">
+                <span class="badge"
+                      :class="c.type === 'template' ? 'badge-template' : c.type === 'judge' ? 'badge-judge' : 'badge-generated'"
+                      x-text="c.type"></span>
+                <span style="color:var(--text-secondary)" x-text="c.assertion"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Judge model (only when judge checks detected) -->
+    <div class="card" x-show="hasJudge()">
+      <h2 style="margin:0 0 .75rem">
+        <i class="ti ti-scale" aria-hidden="true"></i> Judge model
+      </h2>
+      <p style="font-size:14px;color:var(--text-muted);margin:0 0 .75rem">
+        Some checks require a judge model for semantic evaluation.
+      </p>
+      <div style="display:grid;gap:.5rem;grid-template-columns:1fr 1fr">
+        <div>
+          <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Judge adapter</label>
+          <input x-model="judgeAdapter" type="text" style="width:100%">
+        </div>
+        <div>
+          <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Judge model</label>
+          <input x-model="judgeModel" type="text" style="width:100%">
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:.5rem;margin-top:1rem;justify-content:flex-end">
+      <button type="button" class="btn btn-ghost" @click="step = 1">
+        <i class="ti ti-arrow-left" aria-hidden="true"></i> Back
+      </button>
+      <button type="button" class="btn btn-ghost" @click="saveDraft('connect')">
+        <i class="ti ti-device-floppy" aria-hidden="true"></i> Save draft
+      </button>
+      <button type="button" class="btn btn-primary" @click="generate()">
+        <i class="ti ti-bolt" aria-hidden="true"></i> Generate pipeline
+      </button>
+    </div>
+  </div>
+
+  <!-- Step 3: Review (Phase 4 wires the full screen) -->
+  <div x-show="step === 3">
+    <div class="card" style="text-align:center;padding:3rem 1.5rem">
+      <i class="ti ti-list-check" style="font-size:2.5rem;color:var(--text-muted);display:block;margin-bottom:.75rem" aria-hidden="true"></i>
+      <p style="color:var(--text-secondary);margin:0 0 .5rem;font-size:15px;font-weight:500">Pipeline generated</p>
+      <p style="color:var(--text-muted);font-size:13px;margin:0 0 1rem">Review your checks in the pipeline review screen.</p>
+      <a href="/pipelines" class="btn btn-primary">
+        <i class="ti ti-git-branch" aria-hidden="true"></i> View pipelines
+      </a>
+    </div>
+  </div>
+
+  <!-- Step 4: Run -->
+  <div x-show="step === 4">
+    <div class="card" style="text-align:center;padding:3rem 1.5rem">
+      <i class="ti ti-player-play" style="font-size:2.5rem;color:var(--text-muted);display:block;margin-bottom:.75rem" aria-hidden="true"></i>
+      <p style="color:var(--text-secondary);margin:0 0 .5rem;font-size:15px;font-weight:500">Ready to run</p>
+      <p style="color:var(--text-muted);font-size:13px;margin:0 0 1rem">Activate your pipeline and trigger a run from the Runs page.</p>
+      <a href="/pipelines" class="btn btn-primary">
+        <i class="ti ti-git-branch" aria-hidden="true"></i> View pipelines
+      </a>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

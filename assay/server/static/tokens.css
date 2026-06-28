@@ -1,0 +1,150 @@
+/* Assay design system tokens — light mode defaults */
+:root {
+  --surface-0: #FAFAF7;
+  --surface-1: #F1EFE8;
+  --surface-2: #FFFFFF;
+  --text-primary: #2C2C2A;
+  --text-secondary: #5F5E5A;
+  --text-muted: #888780;
+  --border: #E3E1D9;
+  --border-strong: #D3D1C7;
+
+  --text-accent: #185FA5;
+  --bg-accent: #E6F1FB;
+  --border-accent: #85B7EB;
+  --fill-accent: #185FA5;
+  --on-accent: #FFFFFF;
+
+  --text-danger: #A32D2D;
+  --bg-danger: #FCEBEB;
+  --border-danger: #F09595;
+  --fill-danger: #E24B4A;
+  --on-danger: #FFFFFF;
+
+  --text-success: #3B6D11;
+  --bg-success: #EAF3DE;
+  --border-success: #C0DD97;
+
+  --text-warning: #854F0B;
+  --bg-warning: #FAEEDA;
+  --border-warning: #FAC775;
+
+  --text-pro: #534AB7;
+  --bg-pro: #EEEDFE;
+  --border-pro: #AFA9EC;
+
+  --radius: 8px;
+  --radius-card: 12px;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* Dark mode — system preference */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface-0: #1B1B19;
+    --surface-1: #2A2A27;
+    --surface-2: #333330;
+    --text-primary: #F1EFE8;
+    --text-secondary: #B4B2A9;
+    --text-muted: #888780;
+    --border: #3A3A36;
+    --border-strong: #4A4A45;
+
+    --text-accent: #85B7EB;
+    --bg-accent: #0C447C;
+    --border-accent: #185FA5;
+    --fill-accent: #378ADD;
+    --on-accent: #FFFFFF;
+
+    --text-danger: #F09595;
+    --bg-danger: #501313;
+    --border-danger: #A32D2D;
+    --fill-danger: #E24B4A;
+    --on-danger: #FFFFFF;
+
+    --text-success: #97C459;
+    --bg-success: #173404;
+    --border-success: #3B6D11;
+
+    --text-warning: #FAC775;
+    --bg-warning: #412402;
+    --border-warning: #854F0B;
+
+    --text-pro: #AFA9EC;
+    --bg-pro: #26215C;
+    --border-pro: #534AB7;
+  }
+}
+
+/* Dark mode — manual toggle */
+[data-theme="dark"] {
+  --surface-0: #1B1B19;
+  --surface-1: #2A2A27;
+  --surface-2: #333330;
+  --text-primary: #F1EFE8;
+  --text-secondary: #B4B2A9;
+  --text-muted: #888780;
+  --border: #3A3A36;
+  --border-strong: #4A4A45;
+
+  --text-accent: #85B7EB;
+  --bg-accent: #0C447C;
+  --border-accent: #185FA5;
+  --fill-accent: #378ADD;
+  --on-accent: #FFFFFF;
+
+  --text-danger: #F09595;
+  --bg-danger: #501313;
+  --border-danger: #A32D2D;
+  --fill-danger: #E24B4A;
+  --on-danger: #FFFFFF;
+
+  --text-success: #97C459;
+  --bg-success: #173404;
+  --border-success: #3B6D11;
+
+  --text-warning: #FAC775;
+  --bg-warning: #412402;
+  --border-warning: #854F0B;
+
+  --text-pro: #AFA9EC;
+  --bg-pro: #26215C;
+  --border-pro: #534AB7;
+}
+
+/* Light mode — manual toggle */
+[data-theme="light"] {
+  --surface-0: #FAFAF7;
+  --surface-1: #F1EFE8;
+  --surface-2: #FFFFFF;
+  --text-primary: #2C2C2A;
+  --text-secondary: #5F5E5A;
+  --text-muted: #888780;
+  --border: #E3E1D9;
+  --border-strong: #D3D1C7;
+
+  --text-accent: #185FA5;
+  --bg-accent: #E6F1FB;
+  --border-accent: #85B7EB;
+  --fill-accent: #185FA5;
+  --on-accent: #FFFFFF;
+
+  --text-danger: #A32D2D;
+  --bg-danger: #FCEBEB;
+  --border-danger: #F09595;
+  --fill-danger: #E24B4A;
+  --on-danger: #FFFFFF;
+
+  --text-success: #3B6D11;
+  --bg-success: #EAF3DE;
+  --border-success: #C0DD97;
+
+  --text-warning: #854F0B;
+  --bg-warning: #FAEEDA;
+  --border-warning: #FAC775;
+
+  --text-pro: #534AB7;
+  --bg-pro: #EEEDFE;
+  --border-pro: #AFA9EC;
+}

@@ -1,28 +1,37 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="auto">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Assay{% endblock %}</title>
+  <!-- Design system tokens must load first -->
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components.css">
   <link rel="stylesheet" href="/static/style.css">
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap" rel="stylesheet">
+  <!-- Tabler Icons (outline only) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/3.19.0/fonts/tabler-icons.min.css">
+  <!-- JS: Alpine must load before htmx -->
+  <script src="https://unpkg.com/alpinejs@3.13.10/dist/cdn.min.js" defer></script>
   <script src="https://unpkg.com/htmx.org@1.9.10" defer></script>
   <script src="https://unpkg.com/htmx.org@1.9.10/dist/ext/json-enc.js" defer></script>
-  <script src="https://unpkg.com/alpinejs@3.13.10/dist/cdn.min.js" defer></script>
+  <!-- Restore theme before first paint to avoid flash -->
+  <script>
+    (function() {
+      var t = localStorage.getItem('assay-theme');
+      if (t && t !== 'auto') document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+  {% block head %}{% endblock %}
 </head>
 <body>
-  <nav>
-    <a href="/" class="brand">Assay</a>
-    <span class="spacer"></span>
-    {% if identity and identity != 'anonymous' %}
-      <span class="nav-user">{{ identity }}</span>
-      <a href="/logout">Log out</a>
-    {% else %}
-      <a href="/login">Log in</a>
-    {% endif %}
-    {% block nav %}{% endblock %}
-  </nav>
+  {% include "_nav.html" %}
   <main>
     {% block content %}{% endblock %}
   </main>
+  {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Projects — Assay{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 style="margin:0">Projects</h1>
+  <a href="/pipelines/new" class="btn btn-primary">
+    <i class="ti ti-plus" aria-hidden="true"></i> New pipeline
+  </a>
+</div>
+
+{% if projects %}
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem">
+  {% for p in projects %}
+  <div class="card">
+    <h2 style="margin:0 0 .75rem;font-size:1rem;font-weight:600">
+      <i class="ti ti-target" style="color:var(--text-accent)" aria-hidden="true"></i>
+      {{ p.name }}
+    </h2>
+    <dl class="meta" style="gap:.4rem .75rem;margin-bottom:.75rem">
+      <div><dt>Pipelines</dt><dd>{{ p.pipeline_count }}</dd></div>
+      <div><dt>Reports</dt><dd>{{ p.report_count }}</dd></div>
+      {% if p.pass_rate is not none %}
+      <div><dt>Pass rate</dt><dd>{{ "%.0f"|format(p.pass_rate) }}%</dd></div>
+      {% endif %}
+      {% if p.latest_verdict %}
+      <div>
+        <dt>Latest verdict</dt>
+        <dd>
+          {% if p.latest_verdict == 'pass' %}
+            <span class="badge badge-pass"><i class="ti ti-circle-check" aria-hidden="true"></i> Pass</span>
+          {% else %}
+            <span class="badge badge-fail"><i class="ti ti-circle-x" aria-hidden="true"></i> Fail</span>
+          {% endif %}
+        </dd>
+      </div>
+      {% endif %}
+    </dl>
+    {% if p.last_run_at %}
+    <p style="font-size:12px;color:var(--text-muted);margin:0">
+      <i class="ti ti-clock" aria-hidden="true"></i> Last run {{ p.last_run_at }}
+    </p>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card" style="text-align:center;padding:3rem 1.5rem">
+  <i class="ti ti-target" style="font-size:2.5rem;color:var(--text-muted);display:block;margin-bottom:.75rem" aria-hidden="true"></i>
+  <p style="color:var(--text-secondary);margin:0 0 .5rem;font-size:15px;font-weight:500">No projects yet</p>
+  <p style="color:var(--text-muted);font-size:13px;margin:0">Create a pipeline to start your first project.</p>
+  <a href="/pipelines/new" class="btn btn-primary" style="margin-top:1rem">
+    <i class="ti ti-plus" aria-hidden="true"></i> New pipeline
+  </a>
+</div>
+{% endif %}
+
+{% endblock %}

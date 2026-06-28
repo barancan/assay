@@ -1,9 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Review Queue — Assay{% endblock %}
+{% block title %}Reports — Assay{% endblock %}
 
 {% block content %}
-<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:1.25rem;flex-wrap:wrap;gap:.75rem">
-  <h1 style="margin:0">Review Queue</h1>
+<div class="page-header">
+  <h1>Reports</h1>
+</div>
+
+<div class="filter-bar" style="margin-bottom:1.25rem">
   <form method="get" class="queue-filters">
     <select name="state" onchange="this.form.submit()">
       <option value="">All states</option>
@@ -11,44 +14,56 @@
       <option value="ready_for_review" {% if state_filter == 'ready_for_review' %}selected{% endif %}>Ready for review</option>
       <option value="done"             {% if state_filter == 'done' %}selected{% endif %}>Done</option>
     </select>
-    <input type="text" name="project" placeholder="Filter project…" value="{{ project_filter }}" style="width:14rem">
-    <button type="submit">Filter</button>
+    <input type="text" name="project" placeholder="Filter by project…" value="{{ project_filter }}" style="width:14rem">
+    <button type="submit"><i class="ti ti-search" aria-hidden="true"></i> Filter</button>
     {% if state_filter or project_filter %}
-    <a href="/" style="font-size:.85rem">Clear</a>
+    <a href="/" class="btn btn-ghost" style="font-size:13px">Clear</a>
     {% endif %}
   </form>
 </div>
 
 {% if reports %}
-<table>
-  <thead>
-    <tr>
-      <th>#</th>
-      <th>Project</th>
-      <th>State</th>
-      <th>Cases</th>
-      <th>Passed</th>
-      <th>Failed</th>
-      <th>Reviewer</th>
-      <th>Created</th>
-    </tr>
-  </thead>
-  <tbody>
-  {% for r in reports %}
-    <tr>
-      <td><a href="/reports/{{ r.id }}">{{ r.id }}</a></td>
-      <td>{{ r.project }}</td>
-      <td><span class="badge badge-{{ r.state }}">{{ r.state }}</span></td>
-      <td>{{ r.summary.get('cases', 0) }}</td>
-      <td class="pass">{{ r.summary.get('passed', 0) }}</td>
-      <td class="{{ 'fail' if r.summary.get('failed', 0) else '' }}">{{ r.summary.get('failed', 0) }}</td>
-      <td>{{ r.assigned_reviewer or '—' }}</td>
-      <td style="white-space:nowrap;font-size:.85rem;color:#555">{{ r.created_at }}</td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
+<div class="card" style="padding:0;overflow-x:auto">
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Project</th>
+        <th>State</th>
+        <th>Cases</th>
+        <th>Passed</th>
+        <th>Failed</th>
+        <th>Reviewer</th>
+        <th>Created</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in reports %}
+      <tr>
+        <td><a href="/reports/{{ r.id }}">#{{ r.id }}</a></td>
+        <td>{{ r.project }}</td>
+        <td>
+          {% if r.state == 'ready_for_review' %}
+            <span class="badge badge-accent">Ready for review</span>
+          {% elif r.state == 'done' %}
+            <span class="badge badge-neutral">Done</span>
+          {% else %}
+            <span class="badge badge-pending">Pending</span>
+          {% endif %}
+        </td>
+        <td>{{ r.summary.get('cases', 0) }}</td>
+        <td class="pass">{{ r.summary.get('passed', 0) }}</td>
+        <td class="{{ 'fail' if r.summary.get('failed', 0) else '' }}">{{ r.summary.get('failed', 0) }}</td>
+        <td>{{ r.assigned_reviewer or '—' }}</td>
+        <td class="meta-date">{{ r.created_at }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% else %}
-<p style="color:#666;margin-top:2rem">No reports found{% if state_filter or project_filter %} for the current filters{% endif %}.</p>
+<p style="color:var(--text-muted);margin-top:2rem">
+  No reports found{% if state_filter or project_filter %} for the current filters{% endif %}.
+</p>
 {% endif %}
 {% endblock %}
