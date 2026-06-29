@@ -1,0 +1,49 @@
+<nav class="nav" x-data="{
+  theme: localStorage.getItem('assay-theme') || 'dark',
+  init() { this.applyTheme(this.theme); },
+  toggle() {
+    const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    this.theme = next;
+    localStorage.setItem('assay-theme', next);
+    this.applyTheme(next);
+  },
+  applyTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+  },
+  get isDark() {
+    return document.documentElement.getAttribute('data-theme') === 'dark';
+  }
+}">
+  <a href="/" class="nav-brand">Assay</a>
+
+  <div class="nav-links">
+    <a href="/projects" class="nav-link {% if request.url.path.startswith('/projects') %}active{% endif %}">
+      <i class="ti ti-target" aria-hidden="true"></i> Projects
+    </a>
+    <a href="/runs" class="nav-link {% if request.url.path.startswith('/runs') %}active{% endif %}">
+      <i class="ti ti-chart-bar" aria-hidden="true"></i> Runs
+    </a>
+    <a href="/reports" class="nav-link {% if request.url.path == '/reports' or request.url.path == '/' %}active{% endif %}">
+      <i class="ti ti-file-code" aria-hidden="true"></i> Reports
+    </a>
+    <a href="/settings" class="nav-link {% if request.url.path.startswith('/settings') %}active{% endif %}">
+      <i class="ti ti-settings" aria-hidden="true"></i> Settings
+    </a>
+  </div>
+
+  <div class="nav-right">
+    {% if identity and identity != 'anonymous' %}
+      <span class="nav-user">
+        <i class="ti ti-user" aria-hidden="true"></i>
+        {{ identity }}
+      </span>
+      <a href="/logout" class="btn btn-ghost" style="font-size:13px;padding:.25rem .5rem">Log out</a>
+    {% else %}
+      <a href="/login" class="btn btn-ghost" style="font-size:13px;padding:.25rem .5rem">Log in</a>
+    {% endif %}
+    <button class="nav-theme-btn" @click="toggle()"
+            :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'">
+      <i class="ti" :class="isDark ? 'ti-sun' : 'ti-moon'" aria-hidden="true"></i>
+    </button>
+  </div>
+</nav>

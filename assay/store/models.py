@@ -43,6 +43,7 @@ class PipelineVersion(Base):
     created_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
     activated_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     activated_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    step_reached: Mapped[str | None] = mapped_column(String(20), nullable=True)
     pipeline: Mapped["Pipeline"] = relationship(back_populates="versions")
 
 
@@ -133,6 +134,11 @@ class Report(Base):
     assigned_reviewer: Mapped[str | None] = mapped_column(String(120), nullable=True)
     assigned_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
     assigned_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    # Verdict columns (Phase 1)
+    verdict: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    verdict_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    verdict_set_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    verdict_set_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     run: Mapped["Run"] = relationship(back_populates="report")
     transitions: Mapped[list["StateTransition"]] = relationship(back_populates="report")
 
@@ -160,6 +166,13 @@ class CaseAdjudication(Base):
     actor: Mapped[str] = mapped_column(String(120))
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     at: Mapped[dt.datetime] = mapped_column(DateTime, default=_now)
+
+
+class WorkspaceSetting(Base):
+    """Key-value store for workspace-wide configuration (judge defaults, integrations)."""
+    __tablename__ = "workspace_settings"
+    key: Mapped[str] = mapped_column(String(120), primary_key=True)
+    value: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class NotificationRecord(Base):

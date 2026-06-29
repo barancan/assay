@@ -4,26 +4,53 @@
 {% block content %}
 
 {% if report_locked %}
-<div class="banner-locked">This report has been approved and is locked.</div>
+<div class="banner banner-locked">
+  <i class="ti ti-lock" aria-hidden="true"></i>
+  This report has been approved and is locked.
+</div>
 {% endif %}
 
 <div class="page-header">
-  <h1>Report #{{ report_id }}</h1>
-  <span class="badge badge-{{ report_state }}">{{ report_state }}</span>
+  <a href="/reports" class="btn btn-ghost" style="padding:.3rem .5rem;font-size:13px">
+    <i class="ti ti-arrow-left" aria-hidden="true"></i> Reports
+  </a>
+  <h1 style="margin:0">Report #{{ report_id }}</h1>
+  {% if report_state == 'ready_for_review' %}
+    <span class="badge badge-accent">Ready for review</span>
+  {% elif report_state == 'done' %}
+    <span class="badge badge-neutral">Done</span>
+  {% else %}
+    <span class="badge badge-pending">Pending</span>
+  {% endif %}
 </div>
 
-<dl class="meta">
-  <div><dt>Project</dt><dd>{{ run_project }}</dd></div>
-  <div><dt>Run</dt><dd>#{{ run_id }}</dd></div>
-  <div><dt>Triggered by</dt><dd>{{ run_triggered_by or '—' }}</dd></div>
-  <div><dt>Target</dt><dd>{{ target_adapter }}{% if target_model %} / {{ target_model }}{% endif %}</dd></div>
-  {% if target_endpoint %}<div><dt>Endpoint</dt><dd>{{ target_endpoint }}</dd></div>{% endif %}
-  {% if pipeline_version %}
-  <div><dt>Pipeline version</dt><dd>#{{ pipeline_version.id }} (v{{ pipeline_version.version_number }})</dd></div>
-  <div><dt>Content hash</dt><dd><code>{{ pipeline_version.content_hash[:12] }}…</code></dd></div>
-  {% endif %}
-  {% if report_approved_by %}<div><dt>Approved by</dt><dd>{{ report_approved_by }}</dd></div>{% endif %}
-</dl>
+<div class="card">
+  <dl class="meta">
+    <div><dt>Project</dt><dd>{{ run_project }}</dd></div>
+    <div><dt>Run</dt><dd>#{{ run_id }}</dd></div>
+    <div><dt>Triggered by</dt><dd>{{ run_triggered_by or '—' }}</dd></div>
+    <div><dt>Target</dt><dd>{{ target_adapter }}{% if target_model %} / {{ target_model }}{% endif %}</dd></div>
+    {% if target_endpoint %}<div><dt>Endpoint</dt><dd>{{ target_endpoint }}</dd></div>{% endif %}
+    {% if pipeline_version %}
+    <div><dt>Pipeline version</dt><dd>#{{ pipeline_version.id }} (v{{ pipeline_version.version_number }})</dd></div>
+    <div><dt>Content hash</dt><dd><code>{{ pipeline_version.content_hash[:12] }}…</code></dd></div>
+    {% endif %}
+    {% if report_approved_by %}<div><dt>Approved by</dt><dd>{{ report_approved_by }}</dd></div>{% endif %}
+  </dl>
+
+  <!-- Exports inline in the summary card -->
+  <div style="display:flex;gap:.5rem;flex-wrap:wrap;border-top:1px solid var(--border);padding-top:.85rem;margin-top:.25rem">
+    <a href="/reports/{{ report_id }}/export/json" class="btn">
+      <i class="ti ti-download" aria-hidden="true"></i> JSON
+    </a>
+    <a href="/reports/{{ report_id }}/export/md" class="btn">
+      <i class="ti ti-download" aria-hidden="true"></i> Markdown
+    </a>
+    <a href="/reports/{{ report_id }}/export/html" class="btn">
+      <i class="ti ti-download" aria-hidden="true"></i> HTML
+    </a>
+  </div>
+</div>
 
 {% with summary = report_summary %}
 {% include "_summary_bar.html" %}
@@ -31,10 +58,10 @@
 
 <!-- Reviewer assignment -->
 <div class="card">
-  <h2 style="margin-bottom:.75rem">Reviewer</h2>
+  <h2>Reviewer</h2>
   <div id="assigned-reviewer-section">
-    <strong>Assigned to:</strong>
-    {{ assigned_reviewer or '—' }}
+    <span style="color:var(--text-secondary)">Assigned to:</span>
+    <strong>{{ assigned_reviewer or '—' }}</strong>
   </div>
   {% if not report_locked %}
   <form style="margin-top:.75rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap"
@@ -58,18 +85,12 @@
   {% endif %}
 </div>
 
-<!-- Approve -->
-{% if not report_locked and report_state == 'ready_for_review' %}
-<div class="card" style="padding:.75rem 1.5rem">
-  <form method="post" action="/reports/{{ report_id }}/approve" style="display:inline">
-    <button type="submit" class="btn-approve">Approve &amp; lock report</button>
-  </form>
-</div>
-{% endif %}
+<!-- Verdict block -->
+{% include "_verdict_block.html" %}
 
 <!-- Cases -->
 <div class="card" style="padding:1rem 0;overflow-x:auto">
-  <h2 style="padding:0 1.5rem;margin-bottom:.75rem">Cases</h2>
+  <h2 style="padding:0 1.25rem;margin-bottom:.75rem">Cases</h2>
   <table>
     <thead>
       <tr>
@@ -81,7 +102,7 @@
         <th>Effective</th>
         <th>Latency</th>
         <th>Checks</th>
-        <th>Adjudicate</th>
+        <th>Override</th>
       </tr>
     </thead>
     <tbody>
@@ -95,7 +116,9 @@
 <!-- Generated sources -->
 {% if generated_sources %}
 <div class="card">
-  <h2>Generated check sources</h2>
+  <h2>
+    <i class="ti ti-code" aria-hidden="true"></i> Generated check sources
+  </h2>
   {% for path, src in generated_sources.items() %}
   <details style="margin-bottom:.75rem">
     <summary><code>{{ path }}</code></summary>
@@ -104,15 +127,5 @@
   {% endfor %}
 </div>
 {% endif %}
-
-<!-- Exports -->
-<div class="card">
-  <h2>Exports</h2>
-  <div style="display:flex;gap:.75rem;flex-wrap:wrap">
-    <a href="/reports/{{ report_id }}/export/json"><button>Download JSON</button></a>
-    <a href="/reports/{{ report_id }}/export/md"><button>Download Markdown</button></a>
-    <a href="/reports/{{ report_id }}/export/html"><button>Download HTML</button></a>
-  </div>
-</div>
 
 {% endblock %}

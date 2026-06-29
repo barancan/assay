@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% from "_macros.html" import model_selector %}
+{% block title %}Settings — Assay{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 style="margin:0">Settings</h1>
+</div>
+
+<!-- Default judge -->
+<div class="card" x-data="{
+  judgeAdapter: {{ judge_adapter | tojson }},
+  judgeModel: {{ judge_model | tojson }},
+  saved: false,
+  async save() {
+    await fetch('/settings/judge', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({judge_adapter: this.judgeAdapter, judge_model: this.judgeModel})
+    });
+    this.saved = true;
+    setTimeout(() => { this.saved = false; }, 2500);
+  }
+}">
+  <h2 style="margin:0 0 .5rem">
+    <i class="ti ti-scale" aria-hidden="true"></i> Default judge model
+  </h2>
+  <p style="font-size:14px;color:var(--text-muted);margin:0 0 .75rem">
+    Applied to all new pipelines unless overridden during setup.
+  </p>
+  <div style="display:grid;gap:.5rem;grid-template-columns:1fr 1fr;max-width:30rem">
+    <div>
+      <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Adapter</label>
+      <select x-model="judgeAdapter" style="width:100%">
+        <option value="anthropic">anthropic</option>
+        <option value="openai_compat">OpenAI-compatible</option>
+        <option value="ollama">ollama</option>
+      </select>
+    </div>
+    <div>
+      <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Model</label>
+      {{ model_selector('judgeModel', 'judgeAdapter') }}
+    </div>
+  </div>
+  <div style="display:flex;gap:.75rem;align-items:center;margin-top:.75rem">
+    <button type="button" class="btn btn-primary" @click="save()">
+      <i class="ti ti-device-floppy" aria-hidden="true"></i> Save
+    </button>
+    <span x-show="saved" style="font-size:13px;color:var(--text-success)">
+      <i class="ti ti-circle-check" aria-hidden="true"></i> Saved
+    </span>
+  </div>
+</div>
+
+<!-- Auth posture -->
+<div class="card">
+  <h2 style="margin:0 0 .5rem">
+    <i class="ti ti-shield" aria-hidden="true"></i> Auth posture
+  </h2>
+  <p style="font-size:14px;color:var(--text-muted);margin:0 0 .75rem">
+    Controlled via the <code>ASSAY_AUTH</code> environment variable.
+  </p>
+  <div style="display:flex;gap:.5rem;align-items:center">
+    <span class="badge {% if auth_mode == 'enforced' %}badge-accent{% else %}badge-neutral{% endif %}">
+      {{ auth_mode }}
+    </span>
+    <span style="font-size:13px;color:var(--text-muted)">
+      {% if auth_mode == 'enforced' %}
+        Users are required to log in. Reviewers must be registered to approve reports.
+      {% else %}
+        Solo-dev mode — no login required, any actor name is trusted.
+      {% endif %}
+    </span>
+  </div>
+</div>
+
+<!-- Accounts -->
+<div class="card">
+  <h2 style="margin:0 0 .5rem">
+    <i class="ti ti-users" aria-hidden="true"></i> Accounts
+  </h2>
+  {% if users %}
+  <table style="width:100%;border-collapse:collapse;font-size:14px">
+    <thead>
+      <tr style="text-align:left;border-bottom:1px solid var(--border)">
+        <th style="padding:.4rem .5rem;font-weight:500">Name</th>
+        <th style="padding:.4rem .5rem;font-weight:500">Role</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:.4rem .5rem;color:var(--text-secondary)">{{ u.name }}</td>
+        <td style="padding:.4rem .5rem">
+          <span class="badge badge-neutral">{{ u.role }}</span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:var(--text-muted);font-size:14px;margin:0">
+    No accounts registered. In <code>open</code> mode all identities are trusted.
+    Set <code>ASSAY_AUTH=enforced</code> and add reviewers here to enable access control.
+  </p>
+  {% endif %}
+</div>
+{% endblock %}

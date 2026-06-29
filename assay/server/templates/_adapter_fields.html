@@ -1,0 +1,46 @@
+{% from "_macros.html" import model_selector %}
+
+<!-- Adapter selector -->
+<div style="margin-bottom:.75rem">
+  <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Adapter</label>
+  <select x-model="adapter" style="width:100%;max-width:18rem">
+    <option value="mock">mock (offline, no keys)</option>
+    <option value="anthropic">anthropic</option>
+    <option value="openai_compat">OpenAI-compatible</option>
+    <option value="ollama">ollama (local)</option>
+    <option value="rest">REST / HTTP</option>
+  </select>
+</div>
+
+<!-- mock: no fields needed -->
+<div id="adapter-mock-fields" x-show="adapter === 'mock'">
+  <p style="font-size:13px;color:var(--text-muted)">
+    <i class="ti ti-info-circle" aria-hidden="true"></i>
+    Mock adapter runs offline with no API keys required.
+  </p>
+</div>
+
+<!-- Base URL (openai_compat, ollama, rest) -->
+<div x-show="['openai_compat','ollama','rest'].includes(adapter)"
+     style="margin-top:.5rem">
+  <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Base URL</label>
+  <input x-model="endpoint" type="text"
+    :placeholder="adapter === 'ollama' ? 'http://localhost:11434' : adapter === 'openai_compat' ? 'https://api.openai.com/v1' : 'https://api.example.com'"
+    style="width:100%">
+</div>
+
+<!-- API key env var (anthropic, openai_compat, rest) -->
+<div x-show="['anthropic','openai_compat','rest'].includes(adapter)"
+     style="margin-top:.5rem">
+  <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">API key env var</label>
+  <input x-model="key_env" type="text"
+    :placeholder="adapter === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY'"
+    style="width:100%">
+</div>
+
+<!-- Model selector (anthropic, openai_compat, ollama) -->
+<div x-show="['anthropic','openai_compat','ollama'].includes(adapter)"
+     style="margin-top:.5rem">
+  <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Model</label>
+  {{ model_selector('model', 'adapter') }}
+</div>

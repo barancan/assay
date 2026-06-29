@@ -1,0 +1,70 @@
+{% if report_locked and verdict %}
+<div class="card" style="border-color:var(--border-success);background:var(--bg-success)">
+  <h2 style="color:var(--text-success);margin:0 0 .75rem">
+    <i class="ti ti-circle-check" aria-hidden="true"></i> Verdict locked
+  </h2>
+  <dl class="meta">
+    <div>
+      <dt>Verdict</dt>
+      <dd>
+        {% if verdict == 'pass' %}
+          <span class="badge badge-pass"><i class="ti ti-circle-check" aria-hidden="true"></i> Pass</span>
+        {% else %}
+          <span class="badge badge-fail"><i class="ti ti-circle-x" aria-hidden="true"></i> Fail</span>
+        {% endif %}
+      </dd>
+    </div>
+    {% if verdict_reason %}
+    <div><dt>Reason</dt><dd>{{ verdict_reason }}</dd></div>
+    {% endif %}
+    <div><dt>Set by</dt><dd>{{ verdict_set_by or '—' }}</dd></div>
+    {% if verdict_set_at %}
+    <div><dt>At</dt><dd>{{ verdict_set_at }}</dd></div>
+    {% endif %}
+  </dl>
+</div>
+{% elif report_state == 'ready_for_review' %}
+<div class="card" style="border-color:var(--border-accent);background:var(--bg-accent)"
+     x-data="{ verdict: '{{ suggested_verdict or '' }}', reason: '' }">
+  <h2 style="color:var(--text-accent);margin:0 0 .75rem">
+    <i class="ti ti-scale" aria-hidden="true"></i> Set verdict &amp; lock
+  </h2>
+  {% if suggested_verdict %}
+  <p style="font-size:14px;color:var(--text-secondary);margin:0 0 .75rem">
+    Suggested:&nbsp;
+    {% if suggested_verdict == 'pass' %}
+      <span class="badge badge-pass"><i class="ti ti-circle-check" aria-hidden="true"></i> Pass</span>
+    {% else %}
+      <span class="badge badge-fail"><i class="ti ti-circle-x" aria-hidden="true"></i> Fail</span>
+    {% endif %}
+    based on effective case results.
+  </p>
+  {% endif %}
+  <form hx-post="/reports/{{ report_id }}/set-verdict"
+        hx-ext="json-enc"
+        hx-headers='{"X-Assay-User": {{ identity | tojson }}}'
+        style="display:flex;flex-direction:column;gap:.75rem;max-width:28rem">
+    <div style="display:flex;gap:.5rem;align-items:center">
+      <label style="font-size:14px;font-weight:500;min-width:5rem">Verdict</label>
+      <select name="verdict" x-model="verdict" style="flex:1">
+        <option value="">— choose —</option>
+        <option value="pass" {% if suggested_verdict == 'pass' %}selected{% endif %}>Pass</option>
+        <option value="fail" {% if suggested_verdict == 'fail' %}selected{% endif %}>Fail</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:.5rem;align-items:flex-start">
+      <label style="font-size:14px;font-weight:500;min-width:5rem;padding-top:.3rem">Reason</label>
+      <textarea name="reason" x-model="reason" rows="2"
+                placeholder="Brief rationale for this verdict…"
+                style="flex:1;resize:vertical"></textarea>
+    </div>
+    <div>
+      <button type="submit" class="btn btn-primary"
+              :disabled="verdict === '' || reason.trim() === ''"
+              x-bind:title="verdict === '' || reason.trim() === '' ? 'Select a verdict and provide a reason' : ''">
+        <i class="ti ti-circle-check" aria-hidden="true"></i> Set verdict &amp; lock
+      </button>
+    </div>
+  </form>
+</div>
+{% endif %}

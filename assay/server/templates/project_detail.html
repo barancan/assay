@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% block title %}{{ project_name }} — Assay{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <a href="/projects" class="btn btn-ghost" style="padding:.3rem .5rem;font-size:13px">
+    <i class="ti ti-arrow-left" aria-hidden="true"></i> Projects
+  </a>
+  <h1 style="margin:0">{{ project_name }}</h1>
+  <a href="/pipelines/new?project={{ project_name | urlencode }}" class="btn btn-primary">
+    <i class="ti ti-plus" aria-hidden="true"></i> New pipeline
+  </a>
+</div>
+
+<!-- Aggregated stats -->
+<dl class="meta" style="margin-bottom:1.25rem">
+  <div><dt>Pipelines</dt><dd>{{ stats.pipeline_count }}</dd></div>
+  <div><dt>Reports</dt><dd>{{ stats.report_count }}</dd></div>
+  {% if stats.pass_rate is not none %}
+  <div><dt>Pass rate</dt><dd>{{ "%.0f"|format(stats.pass_rate) }}%</dd></div>
+  {% endif %}
+  {% if stats.last_run_at %}
+  <div><dt>Last run</dt><dd>{{ stats.last_run_at }}</dd></div>
+  {% endif %}
+</dl>
+
+<!-- Approved baseline -->
+<div class="card">
+  <h2 style="margin:0 0 .75rem">
+    <i class="ti ti-rosette-discount-check" style="color:var(--text-success)" aria-hidden="true"></i>
+    Approved baseline
+  </h2>
+  {% if baseline %}
+  <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center">
+    <a href="/reports/{{ baseline.id }}" style="font-size:15px;font-weight:500;color:var(--text-accent)">
+      Report #{{ baseline.id }}
+    </a>
+    <span class="badge badge-pass">
+      <i class="ti ti-circle-check" aria-hidden="true"></i> Pass
+    </span>
+    {% if baseline.pipeline_version %}
+    <span style="font-size:13px;color:var(--text-muted)">
+      Pipeline v{{ baseline.pipeline_version }}
+    </span>
+    {% endif %}
+    {% if baseline.verdict_set_by %}
+    <span style="font-size:13px;color:var(--text-secondary)">
+      <i class="ti ti-user" aria-hidden="true"></i> {{ baseline.verdict_set_by }}
+    </span>
+    {% endif %}
+    {% if baseline.created_at %}
+    <span style="font-size:13px;color:var(--text-muted)">{{ baseline.created_at }}</span>
+    {% endif %}
+  </div>
+  <p style="font-size:13px;color:var(--text-muted);margin:.5rem 0 0">
+    This is the most recent approved report — the blessed production baseline.
+  </p>
+  {% else %}
+  <div style="text-align:center;padding:1.5rem 0">
+    <i class="ti ti-rosette-discount-check" style="font-size:2rem;color:var(--text-muted);display:block;margin-bottom:.5rem" aria-hidden="true"></i>
+    <p style="color:var(--text-secondary);font-size:14px;font-weight:500;margin:0 0 .25rem">No approved baseline yet</p>
+    <p style="color:var(--text-muted);font-size:13px;margin:0">
+      Run a pipeline and set a pass verdict to establish the production baseline.
+    </p>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Pipelines section -->
+<div class="card">
+  <h2 style="margin:0 0 .75rem">
+    <i class="ti ti-git-branch" aria-hidden="true"></i> Pipelines
+  </h2>
+  {% if pipelines %}
+  {% for pipe in pipelines %}
+  <div style="padding:.6rem 0;border-bottom:1px solid var(--border)">
+    <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap">
+      <span style="font-weight:500;font-size:14px">{{ pipe.name }}</span>
+      {% if pipe.active_version %}
+      <span class="badge badge-neutral">v{{ pipe.active_version }}</span>
+      {% endif %}
+      {% if pipe.last_verdict == 'pass' %}
+        <span class="badge badge-pass"><i class="ti ti-circle-check" aria-hidden="true"></i> Pass</span>
+      {% elif pipe.last_verdict == 'fail' %}
+        <span class="badge badge-fail"><i class="ti ti-circle-x" aria-hidden="true"></i> Fail</span>
+      {% endif %}
+      {% if pipe.report_count %}
+      <span style="font-size:13px;color:var(--text-muted)">{{ pipe.report_count }} report{{ 's' if pipe.report_count != 1 }}</span>
+      {% endif %}
+      {% if pipe.last_run_at %}
+      <span style="font-size:12px;color:var(--text-muted)">
+        <i class="ti ti-clock" aria-hidden="true"></i> {{ pipe.last_run_at }}
+      </span>
+      {% endif %}
+    </div>
+    {% for draft in pipe.drafts %}
+    <div style="display:flex;gap:.5rem;align-items:center;margin-top:.35rem;padding:.3rem .5rem;
+                background:var(--surface-1);border-radius:var(--radius);font-size:13px">
+      <span class="badge badge-draft">Draft</span>
+      <span style="color:var(--text-secondary)">v{{ draft.version_number }}</span>
+      {% set step = draft.step_reached or 'define' %}
+      {% if step == 'review' %}
+        <span class="badge badge-accent" style="font-size:11px">Review</span>
+      {% elif step == 'connect' %}
+        <span class="badge badge-warning" style="font-size:11px">Connect</span>
+      {% else %}
+        <span class="badge badge-pending" style="font-size:11px">Define</span>
+      {% endif %}
+      <a href="/pipelines/new?resume={{ draft.id }}" class="btn btn-ghost"
+         style="font-size:12px;padding:.15rem .4rem;margin-left:auto">
+        <i class="ti ti-player-play" aria-hidden="true"></i> Resume
+      </a>
+      <button class="btn btn-ghost"
+              style="font-size:12px;padding:.15rem .4rem;color:var(--text-danger)"
+              hx-delete="/pipelines/versions/{{ draft.id }}"
+              hx-target="#draft-row-{{ draft.id }}"
+              hx-swap="outerHTML"
+              hx-confirm="Delete this draft?">
+        <i class="ti ti-trash" aria-hidden="true"></i>
+      </button>
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+  {% else %}
+  <div style="text-align:center;padding:1.5rem 0">
+    <p style="color:var(--text-muted);font-size:14px;margin:0 0 .75rem">No pipelines yet for this project.</p>
+    <a href="/pipelines/new?project={{ project_name | urlencode }}" class="btn btn-primary">
+      <i class="ti ti-plus" aria-hidden="true"></i> New pipeline
+    </a>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Reports section -->
+<div class="card">
+  <h2 style="margin:0 0 .75rem">
+    <i class="ti ti-file-code" aria-hidden="true"></i> Reports
+  </h2>
+  {% if reports %}
+  {% for r in reports %}
+  <a href="/reports/{{ r.id }}" class="row-link" style="margin-bottom:.3rem">
+    <div style="min-width:4rem;flex:0 0 auto">
+      <span style="font-weight:500;color:var(--text-accent);font-size:14px">#{{ r.id }}</span>
+    </div>
+    <div style="min-width:7rem;flex:0 0 auto">
+      {% if r.state == 'ready_for_review' %}
+        <span class="badge badge-accent">Ready</span>
+      {% elif r.state == 'done' %}
+        <span class="badge badge-neutral">Done</span>
+      {% else %}
+        <span class="badge badge-pending">Pending</span>
+      {% endif %}
+    </div>
+    <div style="min-width:6rem;flex:0 0 auto">
+      {% if r.verdict == 'pass' %}
+        <span class="badge badge-pass"><i class="ti ti-circle-check" aria-hidden="true"></i> Pass</span>
+      {% elif r.verdict == 'fail' %}
+        <span class="badge badge-fail"><i class="ti ti-circle-x" aria-hidden="true"></i> Fail</span>
+      {% else %}
+        <span style="color:var(--text-muted);font-size:13px">—</span>
+      {% endif %}
+    </div>
+    <div style="flex:1;font-size:13px;color:var(--text-secondary)">
+      {% if r.summary %}
+        <span class="summary-pass"><i class="ti ti-circle-check" aria-hidden="true"></i> {{ r.summary.get('passed', 0) }}</span>
+        <span class="{{ 'summary-fail' if r.summary.get('failed',0) else '' }}"
+              style="margin-left:.3rem{% if not r.summary.get('failed',0) %};color:var(--text-muted){% endif %}">
+          <i class="ti ti-circle-x" aria-hidden="true"></i> {{ r.summary.get('failed', 0) }}
+        </span>
+      {% endif %}
+    </div>
+    <div style="flex:0 0 auto;font-size:12px;color:var(--text-muted);white-space:nowrap">{{ r.created_at }}</div>
+  </a>
+  {% endfor %}
+  {% else %}
+  <p style="color:var(--text-muted);font-size:14px;margin:0">No reports yet. Activate a pipeline and trigger a run.</p>
+  {% endif %}
+</div>
+{% endblock %}

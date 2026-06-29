@@ -1,32 +1,46 @@
-<tr id="case-row-{{ cr.id }}">
-  <td>{{ cr.suite_id }}</td>
+<tr id="case-row-{{ cr.id }}" {% if not cr.effective_passed %}style="background:var(--bg-danger)"{% endif %}>
+  <td style="color:var(--text-muted);font-size:13px">{{ cr.suite_id }}</td>
   <td>
     <details>
-      <summary>{{ cr.case_id }}</summary>
-      {% for chk in cr.checks %}
-      <div class="check-row">
-        <span class="{{ 'pass' if chk.get('passed') else 'fail' }}">{{ '✓' if chk.get('passed') else '✗' }}</span>
-        <strong>{{ chk.get('check_id', '') }}</strong>: {{ chk.get('message', '') }}
-        {% if chk.get('evidence') %}
-        <pre>{{ chk['evidence'] | tojson(indent=2) }}</pre>
-        {% endif %}
+      <summary style="font-size:13px;color:var(--text-primary);cursor:pointer">{{ cr.case_id }}</summary>
+      <div hx-get="/reports/{{ report_id }}/cases/{{ cr.id }}/transcript"
+           hx-trigger="toggle from:closest details once"
+           hx-swap="outerHTML">
+        <p style="color:var(--text-muted);font-size:12px;padding:.5rem 0">Loading transcript…</p>
       </div>
-      {% endfor %}
     </details>
   </td>
-  <td>{{ cr.requirement_ref or '—' }}</td>
-  <td class="{{ 'pass' if cr.passed else 'fail' }}">{{ 'PASS' if cr.passed else 'FAIL' }}</td>
+  <td style="font-size:13px;color:var(--text-muted)">{{ cr.requirement_ref or '—' }}</td>
   <td>
-    {% if cr.human_verdict %}
-      <span class="{{ 'pass' if cr.human_verdict == 'pass' else 'fail' }}">{{ cr.human_verdict.upper() }}</span>
-      {% if cr.overridden_by %}<small style="color:#888"> by {{ cr.overridden_by }}</small>{% endif %}
+    {% if cr.passed %}
+      <span class="badge badge-pass"><i class="ti ti-check" aria-hidden="true"></i> Pass</span>
     {% else %}
-      <span style="color:#aaa">—</span>
+      <span class="badge badge-fail"><i class="ti ti-x" aria-hidden="true"></i> Fail</span>
     {% endif %}
   </td>
-  <td class="{{ 'pass' if cr.effective_passed else 'fail' }}">{{ 'PASS' if cr.effective_passed else 'FAIL' }}</td>
-  <td style="white-space:nowrap">{{ "%.0f" | format(cr.latency_ms) }} ms</td>
-  <td>{{ cr.checks | length }}</td>
+  <td>
+    {% if cr.human_verdict %}
+      {% if cr.human_verdict == 'pass' %}
+        <span class="badge badge-pass"><i class="ti ti-check" aria-hidden="true"></i> Pass</span>
+      {% else %}
+        <span class="badge badge-fail"><i class="ti ti-x" aria-hidden="true"></i> Fail</span>
+      {% endif %}
+      {% if cr.overridden_by %}
+        <small style="color:var(--text-muted);display:block;font-size:11px">by {{ cr.overridden_by }}</small>
+      {% endif %}
+    {% else %}
+      <span style="color:var(--text-muted)">—</span>
+    {% endif %}
+  </td>
+  <td>
+    {% if cr.effective_passed %}
+      <span class="badge badge-pass"><i class="ti ti-circle-check" aria-hidden="true"></i> Pass</span>
+    {% else %}
+      <span class="badge badge-fail"><i class="ti ti-circle-x" aria-hidden="true"></i> Fail</span>
+    {% endif %}
+  </td>
+  <td style="white-space:nowrap;font-size:13px;color:var(--text-muted)">{{ "%.0f" | format(cr.latency_ms) }} ms</td>
+  <td style="font-size:13px">{{ cr.checks | length }}</td>
   <td>
     {% if not report_locked %}
     <form class="adj-form"
@@ -34,17 +48,25 @@
           hx-ext="json-enc"
           hx-target="#case-row-{{ cr.id }}"
           hx-swap="outerHTML"
-          hx-headers='{"X-Assay-User": {{ identity | tojson }}}'>
-      <select name="verdict">
+          hx-headers='{"X-Assay-User": {{ identity | tojson }}}'
+          x-data="{ reason: '', verdict: '' }">
+      <select name="verdict" x-model="verdict">
         <option value="">— clear —</option>
         <option value="pass" {% if cr.human_verdict == 'pass' %}selected{% endif %}>pass</option>
         <option value="fail" {% if cr.human_verdict == 'fail' %}selected{% endif %}>fail</option>
       </select>
-      <input type="text" name="reason" placeholder="reason">
-      <button type="submit">Override</button>
+      <input type="text" name="reason" placeholder="reason…" x-model="reason"
+             style="width:8rem">
+      <button type="submit"
+              :disabled="verdict !== '' && reason.trim() === ''"
+              x-bind:title="verdict !== '' && reason.trim() === '' ? 'A reason is required when setting a verdict' : ''">
+        Override
+      </button>
     </form>
     {% else %}
-      <em style="color:#aaa;font-size:.85rem">locked</em>
+      <em style="color:var(--text-muted);font-size:13px">
+        <i class="ti ti-lock" aria-hidden="true"></i> locked
+      </em>
     {% endif %}
   </td>
 </tr>

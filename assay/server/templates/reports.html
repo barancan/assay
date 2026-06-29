@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Reports — Assay{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 style="margin:0">Reports</h1>
+  {% if total is defined %}
+  <span style="color:var(--text-muted);font-size:14px">{{ total }} total</span>
+  {% endif %}
+</div>
+
+<div class="filter-bar">
+  <form method="get" action="/reports" style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
+    <input type="text" name="q" value="{{ q_filter }}" placeholder="Search project…" style="width:12rem">
+    <select name="state">
+      <option value="">All states</option>
+      <option value="pending" {% if state_filter == 'pending' %}selected{% endif %}>Pending</option>
+      <option value="ready_for_review" {% if state_filter == 'ready_for_review' %}selected{% endif %}>Ready for review</option>
+      <option value="done" {% if state_filter == 'done' %}selected{% endif %}>Done</option>
+    </select>
+    <select name="verdict">
+      <option value="">All verdicts</option>
+      <option value="pass" {% if verdict_filter == 'pass' %}selected{% endif %}>Pass</option>
+      <option value="fail" {% if verdict_filter == 'fail' %}selected{% endif %}>Fail</option>
+    </select>
+    <input type="text" name="reviewer" value="{{ reviewer_filter }}" placeholder="Reviewer…" style="width:9rem">
+    <button type="submit" class="btn">
+      <i class="ti ti-search" aria-hidden="true"></i> Filter
+    </button>
+    {% if state_filter or project_filter or q_filter or verdict_filter or reviewer_filter %}
+    <a href="/reports" class="btn btn-ghost">
+      <i class="ti ti-x" aria-hidden="true"></i> Clear
+    </a>
+    {% endif %}
+  </form>
+</div>
+
+{% if reports %}
+<div>
+  {% for r in reports %}
+  <a href="/reports/{{ r.id }}" class="row-link">
+    <!-- ID + project -->
+    <div style="min-width:9rem;flex:0 0 auto">
+      <div style="font-weight:500;color:var(--text-accent);font-size:14px">#{{ r.id }}</div>
+      <div style="font-size:12px;color:var(--text-muted)">{{ r.project }}</div>
+    </div>
+
+    <!-- State -->
+    <div style="min-width:7rem;flex:0 0 auto">
+      {% if r.state == 'ready_for_review' %}
+        <span class="badge badge-accent">Ready</span>
+      {% elif r.state == 'done' %}
+        <span class="badge badge-neutral">Done</span>
+      {% else %}
+        <span class="badge badge-pending">Pending</span>
+      {% endif %}
+    </div>
+
+    <!-- Verdict -->
+    <div style="min-width:6rem;flex:0 0 auto">
+      {% if r.verdict == 'pass' %}
+        <span class="badge badge-pass"><i class="ti ti-circle-check" aria-hidden="true"></i> Pass</span>
+      {% elif r.verdict == 'fail' %}
+        <span class="badge badge-fail"><i class="ti ti-circle-x" aria-hidden="true"></i> Fail</span>
+      {% else %}
+        <span style="color:var(--text-muted);font-size:13px">—</span>
+      {% endif %}
+    </div>
+
+    <!-- Pass/fail counts -->
+    <div style="min-width:5rem;flex:0 0 auto;font-size:13px">
+      {% if r.summary %}
+        <span class="summary-pass">
+          <i class="ti ti-circle-check" aria-hidden="true"></i> {{ r.summary.get('passed', 0) }}
+        </span>
+        <span style="margin-left:.3rem" class="{{ 'summary-fail' if r.summary.get('failed', 0) else '' }}"
+              style="{% if not r.summary.get('failed', 0) %}color:var(--text-muted){% endif %}">
+          <i class="ti ti-circle-x" aria-hidden="true"></i> {{ r.summary.get('failed', 0) }}
+        </span>
+      {% else %}
+        <span style="color:var(--text-muted)">—</span>
+      {% endif %}
+    </div>
+
+    <!-- Model under test + meta -->
+    <div style="flex:1;font-size:13px;color:var(--text-secondary);min-width:0">
+      {% if r.target_adapter or r.target_model %}
+      <div>
+        <i class="ti ti-cpu" aria-hidden="true"></i>
+        {{ r.target_adapter }}{% if r.target_model %} / {{ r.target_model }}{% endif %}
+      </div>
+      {% endif %}
+      <div style="font-size:12px;color:var(--text-muted);margin-top:.1rem">
+        {% if r.pipeline_version %}v{{ r.pipeline_version }}{% endif %}
+        {% if r.triggered_by %}&nbsp;&middot;&nbsp;by {{ r.triggered_by }}{% endif %}
+        {% if r.assigned_reviewer %}&nbsp;&middot;&nbsp;<i class="ti ti-user" aria-hidden="true"></i> {{ r.assigned_reviewer }}{% endif %}
+      </div>
+    </div>
+
+    <!-- Date -->
+    <div style="flex:0 0 auto;font-size:12px;color:var(--text-muted);white-space:nowrap">
+      {{ r.created_at }}
+    </div>
+  </a>
+  {% endfor %}
+</div>
+
+{% if total > page_size %}
+<div style="display:flex;gap:.5rem;align-items:center;justify-content:center;padding:.75rem 0">
+  {% if page > 0 %}
+  <a href="/reports?{{ current_params }}{% if current_params %}&{% endif %}page={{ page - 1 }}" class="btn btn-ghost">
+    <i class="ti ti-arrow-left" aria-hidden="true"></i> Prev
+  </a>
+  {% endif %}
+  <span style="font-size:13px;color:var(--text-muted)">Page {{ page + 1 }}</span>
+  {% if (page + 1) * page_size < total %}
+  <a href="/reports?{{ current_params }}{% if current_params %}&{% endif %}page={{ page + 1 }}" class="btn btn-ghost">
+    Next <i class="ti ti-arrow-right" aria-hidden="true"></i>
+  </a>
+  {% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<div class="card" style="text-align:center;padding:3rem 1.5rem">
+  <i class="ti ti-file-code" style="font-size:2.5rem;color:var(--text-muted);display:block;margin-bottom:.75rem" aria-hidden="true"></i>
+  <p style="color:var(--text-secondary);margin:0 0 .5rem;font-size:15px;font-weight:500">No reports yet</p>
+  <p style="color:var(--text-muted);font-size:13px;margin:0">Run a pipeline to generate your first eval report.</p>
+</div>
+{% endif %}
+
+{% endblock %}

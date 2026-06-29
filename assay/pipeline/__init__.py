@@ -5,6 +5,7 @@ from .service import (
     activate_version,
     get_version,
     list_versions,
+    update_step_reached,
 )
 from .hash import content_hash
 
@@ -15,5 +16,6 @@ __all__ = [
     "activate_version",
     "get_version",
     "list_versions",
+    "update_step_reached",
     "content_hash",
 ]

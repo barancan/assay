@@ -2,7 +2,13 @@
      hx-get="/reports/{{ report_id }}/effective-summary"
      hx-trigger="summaryChanged from:body"
      hx-swap="outerHTML">
-  <span><strong>{{ summary.get('cases', 0) }}</strong> cases</span>
-  <span class="pass"><strong>{{ summary.get('passed', 0) }}</strong> passed</span>
-  <span class="{{ 'fail' if summary.get('failed', 0) else '' }}"><strong>{{ summary.get('failed', 0) }}</strong> failed</span>
+  <span style="color:var(--text-secondary)"><strong style="color:var(--text-primary)">{{ summary.get('cases', 0) }}</strong> cases</span>
+  <span class="summary-pass">
+    <i class="ti ti-circle-check" aria-hidden="true"></i>
+    <strong>{{ summary.get('passed', 0) }}</strong> passed
+  </span>
+  <span class="{{ 'summary-fail' if summary.get('failed', 0) else '' }}" style="{% if not summary.get('failed', 0) %}color:var(--text-muted){% endif %}">
+    <i class="ti ti-circle-x" aria-hidden="true"></i>
+    <strong>{{ summary.get('failed', 0) }}</strong> failed
+  </span>
 </div>

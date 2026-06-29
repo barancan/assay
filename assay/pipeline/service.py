@@ -125,6 +125,43 @@ def activate_version(version_id: int, actor: str) -> None:
         pv.activated_at = dt.datetime.now(dt.timezone.utc)
 
 
+def save_draft_from_requirements(
+    project: str,
+    name: str,
+    requirements: str,
+    created_by: str | None = None,
+) -> int:
+    """Create a draft PipelineVersion from raw requirements text. Returns version_id."""
+    config_dict = {
+        "version": 1,
+        "project": project,
+        "requirements": requirements,
+        "target": {"adapter": "mock"},
+        "judges": {},
+        "suites": [],
+        "gating": {},
+    }
+    with session_scope() as s:
+        pipeline = s.query(Pipeline).filter_by(project=project, name=name).one_or_none()
+        if pipeline is None:
+            pipeline = Pipeline(project=project, name=name, created_by=created_by)
+            s.add(pipeline)
+            s.flush()
+        pid = pipeline.id
+    pv = create_version(pid, config_dict, {}, {}, created_by)
+    update_step_reached(pv.id, "define")
+    return pv.id
+
+
+def update_step_reached(version_id: int, step: str) -> None:
+    """Record the draft step reached (define | connect | review)."""
+    with session_scope() as s:
+        pv = s.get(PipelineVersion, version_id)
+        if pv is None:
+            raise ValueError(f"PipelineVersion {version_id} not found")
+        pv.step_reached = step
+
+
 def get_version(version_id: int) -> PipelineVersion | None:
     with session_scope() as s:
         return s.get(PipelineVersion, version_id)

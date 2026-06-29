@@ -1,0 +1,104 @@
+{% macro card(class="") %}
+<div class="card {{ class }}">{{ caller() }}</div>
+{% endmacro %}
+
+{% macro badge(text, variant="neutral") %}
+<span class="badge badge-{{ variant }}">{{ text }}</span>
+{% endmacro %}
+
+{% macro state_badge(state) %}
+{% if state == 'ready_for_review' %}
+<span class="badge badge-ready_for_review">Ready for review</span>
+{% elif state == 'done' %}
+<span class="badge badge-done">Done</span>
+{% elif state == 'pending' %}
+<span class="badge badge-pending">Pending</span>
+{% elif state == 'draft' %}
+<span class="badge badge-draft">Draft</span>
+{% else %}
+<span class="badge badge-neutral">{{ state }}</span>
+{% endif %}
+{% endmacro %}
+
+{% macro verdict_badge(verdict) %}
+{% if verdict == 'pass' %}
+<span class="badge badge-pass"><i class="ti ti-circle-check" aria-hidden="true"></i> Pass</span>
+{% elif verdict == 'fail' %}
+<span class="badge badge-fail"><i class="ti ti-circle-x" aria-hidden="true"></i> Fail</span>
+{% else %}
+<span class="badge badge-neutral">—</span>
+{% endif %}
+{% endmacro %}
+
+{% macro check_type_badge(type) %}
+{% if type == 'generated' %}
+<span class="badge badge-generated">Generated</span>
+{% elif type == 'judge' %}
+<span class="badge badge-judge">Judge</span>
+{% else %}
+<span class="badge badge-template">Template</span>
+{% endif %}
+{% endmacro %}
+
+{% macro filter_bar() %}
+<div class="filter-bar">{{ caller() }}</div>
+{% endmacro %}
+
+{#
+  model_selector(model_var, provider_var)
+  ────────────────────────────────────────
+  Renders a <select> of known models for the current provider plus a
+  "Custom…" option that reveals a free-text <input>.
+
+  model_var    – name of the Alpine property holding the selected model
+                 (rendered literally into Alpine expressions, e.g. 'model')
+  provider_var – name of the Alpine property holding the adapter/provider
+                 (e.g. 'adapter' or 'judgeAdapter')
+
+  Both are resolved against the nearest ancestor x-data scope at runtime.
+#}
+{% macro model_selector(model_var, provider_var) %}
+<div x-data="{
+  _opts: {
+    anthropic:    ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+    openai_compat:['gpt-4o', 'gpt-4o-mini', 'o3'],
+    ollama:       ['llama3', 'mistral', 'qwen2.5'],
+  },
+  _custom: false,
+  _customVal: '',
+  _init() {
+    const known = this._opts[{{ provider_var }}] || [];
+    const cur = {{ model_var }};
+    if (cur && !known.includes(cur)) { this._custom = true; this._customVal = cur; }
+  },
+}"
+x-init="_init()"
+x-effect="
+  const known = _opts[{{ provider_var }}] || [];
+  const cur = {{ model_var }};
+  _custom = Boolean(cur) && !known.includes(cur);
+  if (_custom) _customVal = cur;
+">
+  <select style="width:100%"
+    :value="_custom ? '__custom__' : {{ model_var }}"
+    @change="
+      const v = $event.target.value;
+      if (v === '__custom__') {
+        _custom = true;
+        {{ model_var }} = _customVal;
+      } else {
+        _custom = false;
+        {{ model_var }} = v;
+      }
+    ">
+    <template x-for="m in (_opts[{{ provider_var }}] || [])" :key="m">
+      <option :value="m" x-text="m" :selected="{{ model_var }} === m"></option>
+    </template>
+    <option value="__custom__">Custom…</option>
+  </select>
+  <input type="text" x-show="_custom" style="width:100%;margin-top:.35rem"
+    placeholder="enter model ID"
+    :value="_customVal"
+    @input="{{ model_var }} = $event.target.value; _customVal = $event.target.value">
+</div>
+{% endmacro %}
