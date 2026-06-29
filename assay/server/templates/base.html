@@ -1,9 +1,16 @@
 <!doctype html>
-<html lang="en" data-theme="auto">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Assay{% endblock %}</title>
+  <!-- Pre-paint: apply saved theme (default dark) before stylesheet renders — prevents FOUC -->
+  <script>
+    (function() {
+      var t = localStorage.getItem('assay-theme');
+      document.documentElement.setAttribute('data-theme', t || 'dark');
+    })();
+  </script>
   <!-- Design system tokens must load first -->
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/components.css">
@@ -18,13 +25,6 @@
   <script src="https://unpkg.com/alpinejs@3.13.10/dist/cdn.min.js" defer></script>
   <script src="https://unpkg.com/htmx.org@1.9.10" defer></script>
   <script src="https://unpkg.com/htmx.org@1.9.10/dist/ext/json-enc.js" defer></script>
-  <!-- Restore theme before first paint to avoid flash -->
-  <script>
-    (function() {
-      var t = localStorage.getItem('assay-theme');
-      if (t && t !== 'auto') document.documentElement.setAttribute('data-theme', t);
-    })();
-  </script>
   {% block head %}{% endblock %}
 </head>
 <body>

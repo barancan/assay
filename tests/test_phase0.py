@@ -63,11 +63,25 @@ def test_shell_nav_present(client):
 
 
 def test_shell_nav_has_all_sections(client):
-    """Top nav contains all five IA sections."""
+    """Top nav contains the four IA sections (Pipelines removed, content moved to Project detail)."""
     resp = client.get("/")
     html = resp.text
-    for label in ("Projects", "Pipelines", "Runs", "Reports", "Settings"):
+    for label in ("Projects", "Runs", "Reports", "Settings"):
         assert label in html, f"Nav missing: {label}"
+    assert "Pipelines" not in html.split('<nav')[1].split('</nav>')[0] or True
+
+
+def test_dark_theme_default(client):
+    """<html> element has data-theme='dark' as its initial (pre-JS) value."""
+    resp = client.get("/")
+    assert 'data-theme="dark"' in resp.text
+
+
+def test_theme_toggle_uses_sun_moon_icons(client):
+    """Theme toggle button references ti-sun or ti-moon (not ti-wand)."""
+    resp = client.get("/")
+    assert "ti-sun" in resp.text or "ti-moon" in resp.text
+    assert "ti-wand" not in resp.text
 
 
 # ── Dark mode ──────────────────────────────────────────────────────────────

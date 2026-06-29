@@ -1,10 +1,11 @@
 {% extends "base.html" %}
+{% from "_macros.html" import model_selector %}
 {% block title %}New pipeline — Assay{% endblock %}
 
 {% block content %}
 <div class="page-header">
-  <a href="/pipelines" class="btn btn-ghost" style="padding:.3rem .5rem;font-size:13px">
-    <i class="ti ti-arrow-left" aria-hidden="true"></i> Pipelines
+  <a href="/projects" class="btn btn-ghost" style="padding:.3rem .5rem;font-size:13px">
+    <i class="ti ti-arrow-left" aria-hidden="true"></i> Projects
   </a>
   <h1 style="margin:0">New pipeline</h1>
 </div>
@@ -12,7 +13,7 @@
 <div x-data="{
   step: 1,
   requirements: {{ (resume_data.requirements if resume_data else '') | tojson }},
-  project: {{ (resume_data.project if resume_data else '') | tojson }},
+  project: {{ (resume_data.project if resume_data else project_default) | tojson }},
   name: {{ (resume_data.name if resume_data else '') | tojson }},
   adapter: 'mock',
   model: '',
@@ -50,7 +51,9 @@
       })
     });
     const d = await r.json();
-    if (d.pipeline_version_id) { window.location.href = '/pipelines'; }
+    if (d.pipeline_version_id) {
+      window.location.href = '/projects/' + encodeURIComponent(this.project);
+    }
   },
   async saveDraft(s) {
     if (!this.requirements || !this.project || !this.name) return;
@@ -172,11 +175,15 @@
       <div style="display:grid;gap:.5rem;grid-template-columns:1fr 1fr">
         <div>
           <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Judge adapter</label>
-          <input x-model="judgeAdapter" type="text" style="width:100%">
+          <select x-model="judgeAdapter" style="width:100%">
+            <option value="anthropic">anthropic</option>
+            <option value="openai_compat">OpenAI-compatible</option>
+            <option value="ollama">ollama</option>
+          </select>
         </div>
         <div>
           <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Judge model</label>
-          <input x-model="judgeModel" type="text" style="width:100%">
+          {{ model_selector('judgeModel', 'judgeAdapter') }}
         </div>
       </div>
     </div>
@@ -200,8 +207,8 @@
       <i class="ti ti-list-check" style="font-size:2.5rem;color:var(--text-muted);display:block;margin-bottom:.75rem" aria-hidden="true"></i>
       <p style="color:var(--text-secondary);margin:0 0 .5rem;font-size:15px;font-weight:500">Pipeline generated</p>
       <p style="color:var(--text-muted);font-size:13px;margin:0 0 1rem">Review your checks in the pipeline review screen.</p>
-      <a href="/pipelines" class="btn btn-primary">
-        <i class="ti ti-git-branch" aria-hidden="true"></i> View pipelines
+      <a href="/projects" class="btn btn-primary">
+        <i class="ti ti-target" aria-hidden="true"></i> View projects
       </a>
     </div>
   </div>
@@ -212,8 +219,8 @@
       <i class="ti ti-player-play" style="font-size:2.5rem;color:var(--text-muted);display:block;margin-bottom:.75rem" aria-hidden="true"></i>
       <p style="color:var(--text-secondary);margin:0 0 .5rem;font-size:15px;font-weight:500">Ready to run</p>
       <p style="color:var(--text-muted);font-size:13px;margin:0 0 1rem">Activate your pipeline and trigger a run from the Runs page.</p>
-      <a href="/pipelines" class="btn btn-primary">
-        <i class="ti ti-git-branch" aria-hidden="true"></i> View pipelines
+      <a href="/projects" class="btn btn-primary">
+        <i class="ti ti-target" aria-hidden="true"></i> View projects
       </a>
     </div>
   </div>

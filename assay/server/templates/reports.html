@@ -36,64 +36,73 @@
 </div>
 
 {% if reports %}
-<div class="card" style="padding:0;overflow-x:auto">
-  <table>
-    <thead>
-      <tr>
-        <th>Report</th>
-        <th>State</th>
-        <th>Verdict</th>
-        <th>Summary</th>
-        <th>Target</th>
-        <th>Reviewer</th>
-        <th>Created</th>
-      </tr>
-    </thead>
-    <tbody>
-    {% for r in reports %}
-      <tr>
-        <td>
-          <a href="/reports/{{ r.id }}" style="font-weight:500;color:var(--text-accent)">#{{ r.id }}</a>
-          <div style="font-size:12px;color:var(--text-muted)">{{ r.project }}</div>
-        </td>
-        <td>
-          {% if r.state == 'ready_for_review' %}
-            <span class="badge badge-accent">Ready</span>
-          {% elif r.state == 'done' %}
-            <span class="badge badge-neutral">Done</span>
-          {% else %}
-            <span class="badge badge-pending">Pending</span>
-          {% endif %}
-        </td>
-        <td>
-          {% if r.verdict == 'pass' %}
-            <span class="badge badge-pass"><i class="ti ti-circle-check" aria-hidden="true"></i> Pass</span>
-          {% elif r.verdict == 'fail' %}
-            <span class="badge badge-fail"><i class="ti ti-circle-x" aria-hidden="true"></i> Fail</span>
-          {% else %}
-            <span style="color:var(--text-muted)">—</span>
-          {% endif %}
-        </td>
-        <td style="white-space:nowrap;font-size:13px">
-          {% if r.summary %}
-            <span class="summary-pass" style="font-size:12px">
-              <i class="ti ti-circle-check" aria-hidden="true"></i> {{ r.summary.get('passed', 0) }}
-            </span>
-            <span class="{{ 'summary-fail' if r.summary.get('failed', 0) else '' }}"
-                  style="font-size:12px{% if not r.summary.get('failed', 0) %};color:var(--text-muted){% endif %}">
-              <i class="ti ti-circle-x" aria-hidden="true"></i> {{ r.summary.get('failed', 0) }}
-            </span>
-          {% else %}
-            <span style="color:var(--text-muted)">—</span>
-          {% endif %}
-        </td>
-        <td style="font-size:13px;color:var(--text-secondary)">{{ r.target_adapter or '—' }}</td>
-        <td style="font-size:13px;color:var(--text-secondary)">{{ r.assigned_reviewer or '—' }}</td>
-        <td class="meta-date">{{ r.created_at }}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
+<div>
+  {% for r in reports %}
+  <a href="/reports/{{ r.id }}" class="row-link">
+    <!-- ID + project -->
+    <div style="min-width:9rem;flex:0 0 auto">
+      <div style="font-weight:500;color:var(--text-accent);font-size:14px">#{{ r.id }}</div>
+      <div style="font-size:12px;color:var(--text-muted)">{{ r.project }}</div>
+    </div>
+
+    <!-- State -->
+    <div style="min-width:7rem;flex:0 0 auto">
+      {% if r.state == 'ready_for_review' %}
+        <span class="badge badge-accent">Ready</span>
+      {% elif r.state == 'done' %}
+        <span class="badge badge-neutral">Done</span>
+      {% else %}
+        <span class="badge badge-pending">Pending</span>
+      {% endif %}
+    </div>
+
+    <!-- Verdict -->
+    <div style="min-width:6rem;flex:0 0 auto">
+      {% if r.verdict == 'pass' %}
+        <span class="badge badge-pass"><i class="ti ti-circle-check" aria-hidden="true"></i> Pass</span>
+      {% elif r.verdict == 'fail' %}
+        <span class="badge badge-fail"><i class="ti ti-circle-x" aria-hidden="true"></i> Fail</span>
+      {% else %}
+        <span style="color:var(--text-muted);font-size:13px">—</span>
+      {% endif %}
+    </div>
+
+    <!-- Pass/fail counts -->
+    <div style="min-width:5rem;flex:0 0 auto;font-size:13px">
+      {% if r.summary %}
+        <span class="summary-pass">
+          <i class="ti ti-circle-check" aria-hidden="true"></i> {{ r.summary.get('passed', 0) }}
+        </span>
+        <span style="margin-left:.3rem" class="{{ 'summary-fail' if r.summary.get('failed', 0) else '' }}"
+              style="{% if not r.summary.get('failed', 0) %}color:var(--text-muted){% endif %}">
+          <i class="ti ti-circle-x" aria-hidden="true"></i> {{ r.summary.get('failed', 0) }}
+        </span>
+      {% else %}
+        <span style="color:var(--text-muted)">—</span>
+      {% endif %}
+    </div>
+
+    <!-- Model under test + meta -->
+    <div style="flex:1;font-size:13px;color:var(--text-secondary);min-width:0">
+      {% if r.target_adapter or r.target_model %}
+      <div>
+        <i class="ti ti-cpu" aria-hidden="true"></i>
+        {{ r.target_adapter }}{% if r.target_model %} / {{ r.target_model }}{% endif %}
+      </div>
+      {% endif %}
+      <div style="font-size:12px;color:var(--text-muted);margin-top:.1rem">
+        {% if r.pipeline_version %}v{{ r.pipeline_version }}{% endif %}
+        {% if r.triggered_by %}&nbsp;&middot;&nbsp;by {{ r.triggered_by }}{% endif %}
+        {% if r.assigned_reviewer %}&nbsp;&middot;&nbsp;<i class="ti ti-user" aria-hidden="true"></i> {{ r.assigned_reviewer }}{% endif %}
+      </div>
+    </div>
+
+    <!-- Date -->
+    <div style="flex:0 0 auto;font-size:12px;color:var(--text-muted);white-space:nowrap">
+      {{ r.created_at }}
+    </div>
+  </a>
+  {% endfor %}
 </div>
 
 {% if total > page_size %}

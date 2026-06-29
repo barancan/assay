@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import model_selector %}
 {% block title %}Settings — Assay{% endblock %}
 
 {% block content %}
@@ -7,7 +8,20 @@
 </div>
 
 <!-- Default judge -->
-<div class="card">
+<div class="card" x-data="{
+  judgeAdapter: {{ judge_adapter | tojson }},
+  judgeModel: {{ judge_model | tojson }},
+  saved: false,
+  async save() {
+    await fetch('/settings/judge', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({judge_adapter: this.judgeAdapter, judge_model: this.judgeModel})
+    });
+    this.saved = true;
+    setTimeout(() => { this.saved = false; }, 2500);
+  }
+}">
   <h2 style="margin:0 0 .5rem">
     <i class="ti ti-scale" aria-hidden="true"></i> Default judge model
   </h2>
@@ -17,17 +31,24 @@
   <div style="display:grid;gap:.5rem;grid-template-columns:1fr 1fr;max-width:30rem">
     <div>
       <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Adapter</label>
-      <input id="judge-adapter-input" name="judge_adapter"
-             value="{{ judge_adapter or '' }}" type="text" style="width:100%">
+      <select x-model="judgeAdapter" style="width:100%">
+        <option value="anthropic">anthropic</option>
+        <option value="openai_compat">OpenAI-compatible</option>
+        <option value="ollama">ollama</option>
+      </select>
     </div>
     <div>
       <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Model</label>
-      <input id="judge-model-input" name="judge_model"
-             value="{{ judge_model or '' }}" type="text" style="width:100%">
+      {{ model_selector('judgeModel', 'judgeAdapter') }}
     </div>
   </div>
-  <div style="margin-top:.75rem">
-    <span id="judge-save-result" style="font-size:13px;color:var(--text-muted)"></span>
+  <div style="display:flex;gap:.75rem;align-items:center;margin-top:.75rem">
+    <button type="button" class="btn btn-primary" @click="save()">
+      <i class="ti ti-device-floppy" aria-hidden="true"></i> Save
+    </button>
+    <span x-show="saved" style="font-size:13px;color:var(--text-success)">
+      <i class="ti ti-circle-check" aria-hidden="true"></i> Saved
+    </span>
   </div>
 </div>
 

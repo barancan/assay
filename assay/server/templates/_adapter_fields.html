@@ -1,3 +1,6 @@
+{% from "_macros.html" import model_selector %}
+
+<!-- Adapter selector -->
 <div style="margin-bottom:.75rem">
   <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Adapter</label>
   <select x-model="adapter" style="width:100%;max-width:18rem">
@@ -17,62 +20,27 @@
   </p>
 </div>
 
-<!-- anthropic -->
-<div x-show="adapter === 'anthropic'">
-  <div style="display:grid;gap:.5rem;grid-template-columns:1fr 1fr;margin-top:.5rem">
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Model</label>
-      <input x-model="model" type="text" placeholder="claude-opus-4-8" style="width:100%">
-    </div>
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">API key env var</label>
-      <input x-model="key_env" type="text" placeholder="ANTHROPIC_API_KEY" style="width:100%">
-    </div>
-  </div>
+<!-- Base URL (openai_compat, ollama, rest) -->
+<div x-show="['openai_compat','ollama','rest'].includes(adapter)"
+     style="margin-top:.5rem">
+  <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Base URL</label>
+  <input x-model="endpoint" type="text"
+    :placeholder="adapter === 'ollama' ? 'http://localhost:11434' : adapter === 'openai_compat' ? 'https://api.openai.com/v1' : 'https://api.example.com'"
+    style="width:100%">
 </div>
 
-<!-- openai_compat -->
-<div x-show="adapter === 'openai_compat'">
-  <div style="display:grid;gap:.5rem;grid-template-columns:1fr 1fr;margin-top:.5rem">
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Base URL</label>
-      <input x-model="endpoint" type="text" placeholder="https://api.openai.com/v1" style="width:100%">
-    </div>
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Model</label>
-      <input x-model="model" type="text" placeholder="gpt-4o" style="width:100%">
-    </div>
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">API key env var</label>
-      <input x-model="key_env" type="text" placeholder="OPENAI_API_KEY" style="width:100%">
-    </div>
-  </div>
+<!-- API key env var (anthropic, openai_compat, rest) -->
+<div x-show="['anthropic','openai_compat','rest'].includes(adapter)"
+     style="margin-top:.5rem">
+  <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">API key env var</label>
+  <input x-model="key_env" type="text"
+    :placeholder="adapter === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY'"
+    style="width:100%">
 </div>
 
-<!-- ollama -->
-<div x-show="adapter === 'ollama'">
-  <div style="display:grid;gap:.5rem;grid-template-columns:1fr 1fr;margin-top:.5rem">
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Base URL</label>
-      <input x-model="endpoint" type="text" placeholder="http://localhost:11434" style="width:100%">
-    </div>
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Model</label>
-      <input x-model="model" type="text" placeholder="llama3" style="width:100%">
-    </div>
-  </div>
-</div>
-
-<!-- rest -->
-<div x-show="adapter === 'rest'">
-  <div style="display:grid;gap:.5rem;grid-template-columns:1fr 1fr;margin-top:.5rem">
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Base URL</label>
-      <input x-model="endpoint" type="text" placeholder="https://api.example.com" style="width:100%">
-    </div>
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Auth env var</label>
-      <input x-model="key_env" type="text" placeholder="MY_API_KEY" style="width:100%">
-    </div>
-  </div>
+<!-- Model selector (anthropic, openai_compat, ollama) -->
+<div x-show="['anthropic','openai_compat','ollama'].includes(adapter)"
+     style="margin-top:.5rem">
+  <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Model</label>
+  {{ model_selector('model', 'adapter') }}
 </div>

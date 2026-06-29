@@ -43,3 +43,62 @@
 {% macro filter_bar() %}
 <div class="filter-bar">{{ caller() }}</div>
 {% endmacro %}
+
+{#
+  model_selector(model_var, provider_var)
+  ────────────────────────────────────────
+  Renders a <select> of known models for the current provider plus a
+  "Custom…" option that reveals a free-text <input>.
+
+  model_var    – name of the Alpine property holding the selected model
+                 (rendered literally into Alpine expressions, e.g. 'model')
+  provider_var – name of the Alpine property holding the adapter/provider
+                 (e.g. 'adapter' or 'judgeAdapter')
+
+  Both are resolved against the nearest ancestor x-data scope at runtime.
+#}
+{% macro model_selector(model_var, provider_var) %}
+<div x-data="{
+  _opts: {
+    anthropic:    ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+    openai_compat:['gpt-4o', 'gpt-4o-mini', 'o3'],
+    ollama:       ['llama3', 'mistral', 'qwen2.5'],
+  },
+  _custom: false,
+  _customVal: '',
+  _init() {
+    const known = this._opts[{{ provider_var }}] || [];
+    const cur = {{ model_var }};
+    if (cur && !known.includes(cur)) { this._custom = true; this._customVal = cur; }
+  },
+}"
+x-init="_init()"
+x-effect="
+  const known = _opts[{{ provider_var }}] || [];
+  const cur = {{ model_var }};
+  _custom = Boolean(cur) && !known.includes(cur);
+  if (_custom) _customVal = cur;
+">
+  <select style="width:100%"
+    :value="_custom ? '__custom__' : {{ model_var }}"
+    @change="
+      const v = $event.target.value;
+      if (v === '__custom__') {
+        _custom = true;
+        {{ model_var }} = _customVal;
+      } else {
+        _custom = false;
+        {{ model_var }} = v;
+      }
+    ">
+    <template x-for="m in (_opts[{{ provider_var }}] || [])" :key="m">
+      <option :value="m" x-text="m" :selected="{{ model_var }} === m"></option>
+    </template>
+    <option value="__custom__">Custom…</option>
+  </select>
+  <input type="text" x-show="_custom" style="width:100%;margin-top:.35rem"
+    placeholder="enter model ID"
+    :value="_customVal"
+    @input="{{ model_var }} = $event.target.value; _customVal = $event.target.value">
+</div>
+{% endmacro %}

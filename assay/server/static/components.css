@@ -356,6 +356,48 @@ code {
   gap: .75rem;
 }
 
+/* Clickable row — use <a class="row-link"> wrapping the full row */
+.row-link {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: .6rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  margin-bottom: .35rem;
+  color: var(--text-primary);
+  text-decoration: none;
+  transition: background .1s, border-color .1s;
+}
+.row-link:hover {
+  background: var(--surface-1);
+  border-color: var(--border-strong);
+  text-decoration: none;
+}
+.row-link:focus-visible {
+  outline: 2px solid var(--fill-accent);
+  outline-offset: 2px;
+}
+
+/* Clickable project card */
+.project-card-link {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  border-radius: var(--radius-card);
+  transition: box-shadow .15s, border-color .15s;
+}
+.project-card-link:hover { text-decoration: none; }
+.project-card-link:hover .card {
+  border-color: var(--border-accent);
+  box-shadow: 0 2px 8px rgba(0,0,0,.1);
+}
+.project-card-link:focus-visible {
+  outline: 2px solid var(--fill-accent);
+  outline-offset: 2px;
+}
+
 /* ── Login card ────────────────────────────────────────────── */
 .login-card {
   max-width: 420px;

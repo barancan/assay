@@ -105,7 +105,7 @@ def test_projects_page(client):
 # ── Pipelines drafts page ──────────────────────────────────────────────────
 
 def test_pipelines_page_drafts(client):
-    """GET /pipelines with Accept: text/html lists draft versions with a Resume link."""
+    """Draft pipelines appear in the Project detail page with a Resume link."""
     from assay.pipeline import create_pipeline, create_version
     from assay.store import session_scope
     from assay.store.models import PipelineVersion
@@ -119,10 +119,15 @@ def test_pipelines_page_drafts(client):
     pv = create_version(p.id, cfg, {}, {})
     # Leave as draft (don't activate)
 
+    # GET /pipelines HTML now redirects to /projects
     resp = client.get("/pipelines", headers={"Accept": "text/html"})
-    assert resp.status_code == 200
-    assert "my-draft-pipe" in resp.text
-    assert "Resume" in resp.text
+    assert resp.status_code in (302, 200)
+
+    # The draft appears in the project detail page
+    resp2 = client.get("/projects/drafts-test", headers={"Accept": "text/html"})
+    assert resp2.status_code == 200
+    assert "my-draft-pipe" in resp2.text
+    assert "Resume" in resp2.text
 
 
 # ── step_reached ───────────────────────────────────────────────────────────

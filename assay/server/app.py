@@ -31,9 +31,12 @@ _DIR = os.path.dirname(__file__)
 _TEMPLATES_DIR = os.path.join(_DIR, "templates")
 _STATIC_DIR = os.path.join(_DIR, "static")
 
+from urllib.parse import quote as _urlquote
+
 templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 templates.env.filters["tojson"] = lambda v, indent=None: json.dumps(v, indent=indent)
 templates.env.filters["clean_request"] = lambda d: {k: v for k, v in (d or {}).items() if not str(k).startswith("_")}
+templates.env.filters["urlencode"] = lambda s: _urlquote(str(s), safe="")
 
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
@@ -137,6 +140,7 @@ def _report_ctx(report_id: int, request: Request) -> dict:
 
 @app.get("/", response_class=HTMLResponse)
 def queue(request: Request, state: str | None = None, project: str | None = None):
+    from ..store.models import TargetModel
     with session_scope() as s:
         rows = s.query(Report).order_by(Report.created_at.desc()).all()
         report_rows = []
@@ -146,13 +150,19 @@ def queue(request: Request, state: str | None = None, project: str | None = None
                 continue
             if project and run.project != project:
                 continue
+            target = s.get(TargetModel, run.target_id) if run.target_id else None
+            pv = s.get(PipelineVersion, run.pipeline_version_id) if run.pipeline_version_id else None
             report_rows.append({
                 "id": r.id,
                 "state": r.state,
+                "verdict": r.verdict,
                 "project": run.project,
                 "summary": dict(r.summary) if r.summary else {},
                 "assigned_reviewer": r.assigned_reviewer,
-                "pipeline_version_id": run.pipeline_version_id,
+                "triggered_by": run.triggered_by,
+                "target_adapter": target.adapter if target else None,
+                "target_model": target.model if target else None,
+                "pipeline_version": pv.version_number if pv else None,
                 "created_at": str(r.created_at)[:19],
             })
     return templates.TemplateResponse(request, "queue.html", {
@@ -197,30 +207,8 @@ def logout():
 @app.get("/pipelines")
 def list_pipelines(request: Request):
     if "text/html" in request.headers.get("accept", ""):
-        with session_scope() as s:
-            rows = (
-                s.query(PipelineVersion, Pipeline)
-                .join(Pipeline, PipelineVersion.pipeline_id == Pipeline.id)
-                .filter(PipelineVersion.status == "draft")
-                .order_by(PipelineVersion.id.desc())
-                .all()
-            )
-            drafts = [
-                {
-                    "id": pv.id,
-                    "pipeline_id": p.id,
-                    "pipeline_name": p.name,
-                    "project": p.project,
-                    "version_number": pv.version_number,
-                    "step_reached": pv.step_reached,
-                    "created_at": str(pv.created_at)[:19],
-                }
-                for pv, p in rows
-            ]
-        return templates.TemplateResponse(request, "pipelines.html", {
-            "drafts": drafts,
-            "identity": _identity(request),
-        })
+        # Drafts now live inside Project detail — redirect browsers to /projects.
+        return RedirectResponse("/projects", status_code=302)
     with session_scope() as s:
         return [
             {"id": p.id, "project": p.project, "name": p.name,
@@ -242,7 +230,7 @@ _ADAPTER_NAMES = ["mock", "anthropic", "openai_compat", "ollama", "rest"]
 
 
 @app.get("/pipelines/new", response_class=HTMLResponse)
-def pipeline_new_page(request: Request, resume: int | None = None):
+def pipeline_new_page(request: Request, resume: int | None = None, project: str | None = None):
     with session_scope() as s:
         ja = s.get(WorkspaceSetting, "judge_adapter")
         jm = s.get(WorkspaceSetting, "judge_model")
@@ -267,6 +255,7 @@ def pipeline_new_page(request: Request, resume: int | None = None):
         "judge_adapter": judge_adapter,
         "judge_model": judge_model,
         "resume_data": resume_data,
+        "project_default": project or "",
         "identity": _identity(request),
     })
 
@@ -351,7 +340,7 @@ def pipeline_generate(
     pv = create_version(pid, spec_dict, {}, {}, actor)
     update_step_reached(pv.id, "review")
     if _is_htmx(request):
-        return Response(headers={"HX-Redirect": f"/pipelines"})
+        return Response(headers={"HX-Redirect": f"/projects/{_urlquote(body.project, safe='')}"})
     return {"pipeline_version_id": pv.id}
 
 
@@ -405,6 +394,19 @@ def settings_judge():
     }
 
 
+class JudgeSettingsBody(BaseModel):
+    judge_adapter: str
+    judge_model: str
+
+
+@app.post("/settings/judge")
+def update_judge_settings(body: JudgeSettingsBody):
+    with session_scope() as s:
+        s.merge(WorkspaceSetting(key="judge_adapter", value=body.judge_adapter))
+        s.merge(WorkspaceSetting(key="judge_model", value=body.judge_model))
+    return {"ok": True}
+
+
 @app.get("/projects", response_class=HTMLResponse)
 def list_projects(request: Request):
     from ..store.models import Run
@@ -454,6 +456,131 @@ def list_projects(request: Request):
 @app.post("/projects")
 def create_project(request: Request, name: str = Form(...)):
     return RedirectResponse("/projects", status_code=303)
+
+
+@app.get("/projects/{project_name}", response_class=HTMLResponse)
+def project_detail(request: Request, project_name: str):
+    from ..store.models import Run as _Run
+    from urllib.parse import unquote as _unquote
+    project_name = _unquote(project_name)
+    with session_scope() as s:
+        # Stats
+        pipeline_count = s.query(Pipeline).filter_by(project=project_name).count()
+        run_ids = [r.id for r in s.query(_Run).filter_by(project=project_name).all()]
+        report_count = 0
+        pass_rate = None
+        last_run_at = None
+        baseline = None
+        if run_ids:
+            reports_q = s.query(Report).filter(Report.run_id.in_(run_ids))
+            report_count = reports_q.count()
+            all_rep = reports_q.all()
+            total_cases = sum(r.summary.get("cases", 0) for r in all_rep)
+            total_passed = sum(r.summary.get("passed", 0) for r in all_rep)
+            pass_rate = (total_passed / total_cases * 100) if total_cases > 0 else None
+            last_run = (
+                s.query(_Run).filter_by(project=project_name)
+                .order_by(_Run.started_at.desc()).first()
+            )
+            if last_run:
+                last_run_at = str(last_run.started_at)[:10]
+            # Approved baseline: most recent done+pass report
+            bl = (
+                reports_q.filter(Report.state == "done", Report.verdict == "pass")
+                .order_by(Report.created_at.desc()).first()
+            )
+            if bl:
+                bl_run = s.get(_Run, bl.run_id)
+                bl_pv = s.get(PipelineVersion, bl_run.pipeline_version_id) if bl_run and bl_run.pipeline_version_id else None
+                baseline = {
+                    "id": bl.id,
+                    "pipeline_version": bl_pv.version_number if bl_pv else None,
+                    "verdict_set_by": bl.verdict_set_by,
+                    "created_at": str(bl.created_at)[:10],
+                }
+        # Pipelines with versions
+        pipes_raw = s.query(Pipeline).filter_by(project=project_name).order_by(Pipeline.name).all()
+        pipelines = []
+        for pipe in pipes_raw:
+            active_pv = (
+                s.query(PipelineVersion)
+                .filter_by(pipeline_id=pipe.id, status="active")
+                .order_by(PipelineVersion.version_number.desc()).first()
+            )
+            drafts_pv = (
+                s.query(PipelineVersion)
+                .filter_by(pipeline_id=pipe.id, status="draft")
+                .order_by(PipelineVersion.id.desc()).all()
+            )
+            pipe_run_ids = [r.id for r in s.query(_Run).filter_by(project=project_name).all()]
+            pipe_report_count = 0
+            last_verdict = None
+            last_pipe_run = None
+            if pipe_run_ids and active_pv:
+                # narrow to runs for this pipeline version
+                pv_runs = s.query(_Run).filter(
+                    _Run.pipeline_version_id == active_pv.id
+                ).all()
+                pv_run_ids = [r.id for r in pv_runs]
+                if pv_run_ids:
+                    pipe_report_count = s.query(Report).filter(Report.run_id.in_(pv_run_ids)).count()
+                    latest_done = (
+                        s.query(Report)
+                        .filter(Report.run_id.in_(pv_run_ids), Report.state == "done")
+                        .order_by(Report.created_at.desc()).first()
+                    )
+                    if latest_done:
+                        last_verdict = latest_done.verdict
+                    last_pv_run = (
+                        s.query(_Run).filter(_Run.pipeline_version_id == active_pv.id)
+                        .order_by(_Run.started_at.desc()).first()
+                    )
+                    if last_pv_run:
+                        last_pipe_run = str(last_pv_run.started_at)[:10]
+            pipelines.append({
+                "id": pipe.id,
+                "name": pipe.name,
+                "active_version": active_pv.version_number if active_pv else None,
+                "last_verdict": last_verdict,
+                "report_count": pipe_report_count,
+                "last_run_at": last_pipe_run,
+                "drafts": [
+                    {
+                        "id": d.id,
+                        "version_number": d.version_number,
+                        "step_reached": d.step_reached or "define",
+                    }
+                    for d in drafts_pv
+                ],
+            })
+        # Reports for this project
+        report_rows = []
+        if run_ids:
+            reps = (
+                s.query(Report).filter(Report.run_id.in_(run_ids))
+                .order_by(Report.created_at.desc()).limit(50).all()
+            )
+            for r in reps:
+                report_rows.append({
+                    "id": r.id,
+                    "state": r.state,
+                    "verdict": r.verdict,
+                    "summary": dict(r.summary) if r.summary else {},
+                    "created_at": str(r.created_at)[:10],
+                })
+    return templates.TemplateResponse(request, "project_detail.html", {
+        "project_name": project_name,
+        "stats": {
+            "pipeline_count": pipeline_count,
+            "report_count": report_count,
+            "pass_rate": pass_rate,
+            "last_run_at": last_run_at,
+        },
+        "baseline": baseline,
+        "pipelines": pipelines,
+        "reports": report_rows,
+        "identity": _identity(request),
+    })
 
 
 @app.delete("/pipelines/versions/{version_id}")
@@ -567,7 +694,8 @@ def list_reports(
             report_rows = []
             for r in rows:
                 run = s.get(_Run, r.run_id)
-                target = s.get(TargetModel, run.target_id)
+                target = s.get(TargetModel, run.target_id) if run.target_id else None
+                pv = s.get(PipelineVersion, run.pipeline_version_id) if run.pipeline_version_id else None
                 report_rows.append({
                     "id": r.id,
                     "state": r.state,
@@ -575,6 +703,9 @@ def list_reports(
                     "project": run.project,
                     "summary": dict(r.summary) if r.summary else {},
                     "target_adapter": target.adapter if target else None,
+                    "target_model": target.model if target else None,
+                    "pipeline_version": pv.version_number if pv else None,
+                    "triggered_by": run.triggered_by,
                     "assigned_reviewer": r.assigned_reviewer,
                     "created_at": str(r.created_at)[:19],
                 })
