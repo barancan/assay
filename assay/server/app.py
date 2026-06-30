@@ -269,6 +269,7 @@ def pipeline_new_page(request: Request, resume: int | None = None, project: str 
                 target = cfg.get("target", {}) or {}
                 resume_data = {
                     "version_id": pv.id,
+                    "pipeline_id": pipe.id if pipe else None,
                     "requirements": cfg.get("requirements", ""),
                     "step_reached": pv.step_reached or "define",
                     "project": pipe.project if pipe else "",
@@ -638,6 +639,30 @@ def delete_draft_version(version_id: int, request: Request):
         s.delete(pv)
     if _is_htmx(request):
         return HTMLResponse("")
+    return {"ok": True}
+
+
+@app.delete("/pipelines/{pipeline_id}")
+def delete_pipeline(pipeline_id: int, request: Request):
+    with session_scope() as s:
+        pipe = s.get(Pipeline, pipeline_id)
+        if not pipe:
+            raise HTTPException(404, "pipeline not found")
+        version_ids = [pv.id for pv in pipe.versions]
+        if version_ids:
+            has_runs = s.query(_Run).filter(_Run.pipeline_version_id.in_(version_ids)).first()
+            if has_runs:
+                raise HTTPException(
+                    409,
+                    "Cannot delete pipeline — it has associated run history. "
+                    "Delete the runs first or archive this pipeline instead.",
+                )
+        for pv in list(pipe.versions):
+            s.delete(pv)
+        project = pipe.project
+        s.delete(pipe)
+    if _is_htmx(request):
+        return Response(headers={"HX-Redirect": f"/projects/{_urlquote(project, safe='')}"})
     return {"ok": True}
 
 

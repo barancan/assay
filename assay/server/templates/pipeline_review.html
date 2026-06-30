@@ -16,6 +16,12 @@
   {% else %}
     <span class="badge badge-draft">Draft</span>
   {% endif %}
+  <button class="btn btn-ghost" style="color:var(--text-danger);margin-left:auto"
+          hx-delete="/pipelines/{{ pipeline_id }}"
+          hx-confirm="Delete pipeline '{{ pipeline_name }}'? This removes all versions and cannot be undone."
+          hx-on:htmx:after-request="if(event.detail.successful) window.location='/projects/{{ project_name | urlencode }}'">
+    <i class="ti ti-trash" aria-hidden="true"></i> Delete pipeline
+  </button>
 </div>
 
 <!-- Pipeline info -->

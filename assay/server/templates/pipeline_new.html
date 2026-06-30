@@ -119,13 +119,13 @@
         </div>
       </div>
       <div style="display:flex;gap:.5rem;margin-top:1rem;align-items:center">
-        {% if resume_data %}
+        {% if resume_data and resume_data.pipeline_id %}
         <button type="button" class="btn btn-ghost"
                 style="color:var(--text-danger)"
-                hx-delete="/pipelines/versions/{{ resume_data.version_id }}"
-                hx-confirm="Delete this draft? This cannot be undone."
-                hx-on:htmx:after-request="if(event.detail.successful) window.location='/pipelines'">
-          <i class="ti ti-trash" aria-hidden="true"></i> Delete draft
+                hx-delete="/pipelines/{{ resume_data.pipeline_id }}"
+                hx-confirm="Delete pipeline '{{ resume_data.name }}'? This removes all versions and cannot be undone."
+                hx-on:htmx:after-request="if(event.detail.successful) window.location='/projects/{{ resume_data.project | urlencode }}'">
+          <i class="ti ti-trash" aria-hidden="true"></i> Delete pipeline
         </button>
         {% endif %}
         <div style="margin-left:auto;display:flex;gap:.5rem">
@@ -211,13 +211,13 @@
     </div>
 
     <div style="display:flex;gap:.5rem;margin-top:1rem;align-items:center">
-      {% if resume_data %}
+      {% if resume_data and resume_data.pipeline_id %}
       <button type="button" class="btn btn-ghost"
               style="color:var(--text-danger)"
-              hx-delete="/pipelines/versions/{{ resume_data.version_id }}"
-              hx-confirm="Delete this draft? This cannot be undone."
-              hx-on:htmx:after-request="if(event.detail.successful) window.location='/pipelines'">
-        <i class="ti ti-trash" aria-hidden="true"></i> Delete draft
+              hx-delete="/pipelines/{{ resume_data.pipeline_id }}"
+              hx-confirm="Delete pipeline '{{ resume_data.name }}'? This removes all versions and cannot be undone."
+              hx-on:htmx:after-request="if(event.detail.successful) window.location='/projects/{{ resume_data.project | urlencode }}'">
+        <i class="ti ti-trash" aria-hidden="true"></i> Delete pipeline
       </button>
       {% endif %}
       <div style="margin-left:auto;display:flex;gap:.5rem">
