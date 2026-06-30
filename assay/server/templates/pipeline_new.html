@@ -12,6 +12,8 @@
 
 <div x-data="{
   step: 1,
+  generating: false,
+  generatedVersionId: null,
   requirements: {{ (resume_data.requirements if resume_data else '') | tojson }},
   project: {{ (resume_data.project if resume_data else project_default) | tojson }},
   name: {{ (resume_data.name if resume_data else '') | tojson }},
@@ -42,6 +44,7 @@
     this.preview = await r.json();
   },
   async generate() {
+    this.generating = true;
     const payload = {
       project: this.project, name: this.name, requirements: this.requirements,
       adapter_spec: {adapter: this.adapter, model: this.model || null,
@@ -54,8 +57,10 @@
       body: JSON.stringify(payload)
     });
     const d = await r.json();
+    this.generating = false;
     if (d.pipeline_version_id) {
-      window.location.href = '/projects/' + encodeURIComponent(this.project);
+      this.generatedVersionId = d.pipeline_version_id;
+      this.step = 3;
     }
   },
   async saveDraft(s) {
@@ -71,7 +76,7 @@
 
   <!-- Step tabs -->
   <div style="display:flex;align-items:center;margin-bottom:1.25rem;gap:.25rem">
-    {% for label in ['Define', 'Connect', 'Review', 'Run'] %}
+    {% for label in ['Define', 'Connect', 'Review'] %}
     {% set n = loop.index %}
     <div style="padding:.4rem .85rem;font-size:13px;font-weight:500;border-radius:var(--radius)"
          :style="step === {{ n }} ? {'background':'var(--bg-accent)','color':'var(--text-accent)','borderRadius':'var(--radius)'} : {'color':'var(--text-muted)'}">
@@ -222,34 +227,75 @@
         <button type="button" class="btn btn-ghost" @click="saveDraft('connect')">
           <i class="ti ti-device-floppy" aria-hidden="true"></i> Save draft
         </button>
-        <button type="button" class="btn btn-primary" @click="generate()">
-          <i class="ti ti-bolt" aria-hidden="true"></i> Generate pipeline
+        <button type="button" class="btn btn-primary" @click="generate()" :disabled="generating">
+          <i class="ti" :class="generating ? 'ti-loader-2' : 'ti-arrow-right'" aria-hidden="true"></i>
+          <span x-text="generating ? 'Generating…' : 'Review'"></span>
         </button>
       </div>
     </div>
   </div>
 
-  <!-- Step 3: Review (Phase 4 wires the full screen) -->
+  <!-- Step 3: Review -->
   <div x-show="step === 3">
-    <div class="card" style="text-align:center;padding:3rem 1.5rem">
-      <i class="ti ti-list-check" style="font-size:2.5rem;color:var(--text-muted);display:block;margin-bottom:.75rem" aria-hidden="true"></i>
-      <p style="color:var(--text-secondary);margin:0 0 .5rem;font-size:15px;font-weight:500">Pipeline generated</p>
-      <p style="color:var(--text-muted);font-size:13px;margin:0 0 1rem">Review your checks in the pipeline review screen.</p>
-      <a href="/projects" class="btn btn-primary">
-        <i class="ti ti-target" aria-hidden="true"></i> View projects
-      </a>
+    <!-- Success header -->
+    <div class="card" style="border:1px solid var(--border-success,var(--border));margin-bottom:.75rem">
+      <div style="display:flex;align-items:center;gap:.6rem">
+        <i class="ti ti-circle-check" style="font-size:1.4rem;color:var(--text-success)" aria-hidden="true"></i>
+        <div>
+          <p style="margin:0;font-weight:500;font-size:15px">Pipeline ready</p>
+          <p style="margin:0;font-size:13px;color:var(--text-muted)">
+            Generated and activated — you can run it now.
+          </p>
+        </div>
+      </div>
     </div>
-  </div>
 
-  <!-- Step 4: Run -->
-  <div x-show="step === 4">
-    <div class="card" style="text-align:center;padding:3rem 1.5rem">
-      <i class="ti ti-player-play" style="font-size:2.5rem;color:var(--text-muted);display:block;margin-bottom:.75rem" aria-hidden="true"></i>
-      <p style="color:var(--text-secondary);margin:0 0 .5rem;font-size:15px;font-weight:500">Ready to run</p>
-      <p style="color:var(--text-muted);font-size:13px;margin:0 0 1rem">Activate your pipeline and trigger a run from the Runs page.</p>
-      <a href="/projects" class="btn btn-primary">
-        <i class="ti ti-target" aria-hidden="true"></i> View projects
-      </a>
+    <!-- Config summary -->
+    <div class="card" style="margin-bottom:.75rem">
+      <h2 style="margin:0 0 .85rem;font-size:15px">Configuration</h2>
+      <dl class="meta" style="margin:0">
+        <div><dt>Project</dt><dd x-text="project"></dd></div>
+        <div><dt>Pipeline</dt><dd x-text="name"></dd></div>
+        <div><dt>Adapter</dt><dd x-text="adapter"></dd></div>
+        <div x-show="model"><dt>Model</dt><dd x-text="model"></dd></div>
+        <div x-show="endpoint"><dt>Endpoint</dt><dd x-text="endpoint" style="word-break:break-all"></dd></div>
+      </dl>
+      <div style="margin-top:.85rem;padding-top:.75rem;border-top:1px solid var(--border)">
+        <p style="font-size:12px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;
+                   color:var(--text-muted);margin:0 0 .35rem">Requirements</p>
+        <p style="font-size:13px;color:var(--text-primary);margin:0;white-space:pre-wrap"
+           x-text="requirements"></p>
+      </div>
+    </div>
+
+    <!-- Checks summary -->
+    <div class="card" style="margin-bottom:.75rem" x-show="preview && preview.checks && preview.checks.length">
+      <h2 style="margin:0 0 .75rem;font-size:15px">
+        Checks
+        <span style="font-weight:400;color:var(--text-muted);font-size:13px"
+              x-text="'(' + (preview ? preview.checks.length : 0) + ' total)'"></span>
+      </h2>
+      <template x-for="chk in (preview ? preview.checks : [])" :key="chk.id || chk.assertion">
+        <div style="display:flex;gap:.5rem;align-items:baseline;padding:.3rem 0;
+                    border-bottom:1px solid var(--border);font-size:13px">
+          <span class="badge"
+                :class="chk.type === 'template' ? 'badge-neutral' : chk.type === 'judge' ? 'badge-accent' : 'badge-warning'"
+                style="flex-shrink:0;font-size:11px"
+                x-text="chk.type"></span>
+          <span style="color:var(--text-primary)" x-text="chk.assertion || chk.id"></span>
+        </div>
+      </template>
+    </div>
+
+    <!-- Actions -->
+    <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.25rem">
+      <button type="button" class="btn btn-ghost" @click="step = 2">
+        <i class="ti ti-arrow-left" aria-hidden="true"></i> Back
+      </button>
+      <button type="button" class="btn btn-primary"
+              @click="window.location.href = '/projects/' + encodeURIComponent(project)">
+        <i class="ti ti-target" aria-hidden="true"></i> Go to project
+      </button>
     </div>
   </div>
 
