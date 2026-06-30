@@ -10,41 +10,38 @@
 </div>
 
 {% if projects %}
-<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem">
+<div class="project-grid">
   {% for p in projects %}
   <a href="/projects/{{ p.name | urlencode }}" class="project-card-link">
-    <div class="card" style="margin-bottom:0">
-      <h2 style="margin:0 0 .75rem;font-size:1rem;font-weight:600">
+    <div class="card project-card">
+      <h2 class="project-card-title">
         <i class="ti ti-target" style="color:var(--text-accent)" aria-hidden="true"></i>
         {{ p.name }}
       </h2>
-      <dl class="meta" style="gap:.4rem .75rem;margin-bottom:.75rem">
+      <dl class="meta project-card-meta">
         <div><dt>Pipelines</dt><dd>{{ p.pipeline_count }}</dd></div>
-        <div><dt>Reports</dt><dd>{{ p.report_count }}</dd></div>
-        {% if p.pass_rate is not none %}
-        <div><dt>Pass rate</dt><dd>{{ "%.0f"|format(p.pass_rate) }}%</dd></div>
-        {% endif %}
-        {% if p.latest_verdict %}
+        <div><dt>Reports</dt><dd>{{ p.report_count if p.report_count else '—' }}</dd></div>
+        <div>
+          <dt>Pass rate</dt>
+          <dd>{% if p.pass_rate is not none %}{{ "%.0f"|format(p.pass_rate) }}%{% else %}N/A{% endif %}</dd>
+        </div>
         <div>
           <dt>Latest verdict</dt>
           <dd>
             {% if p.latest_verdict == 'pass' %}
               <span class="badge badge-pass"><i class="ti ti-circle-check" aria-hidden="true"></i> Pass</span>
-            {% else %}
+            {% elif p.latest_verdict == 'fail' %}
               <span class="badge badge-fail"><i class="ti ti-circle-x" aria-hidden="true"></i> Fail</span>
+            {% else %}
+              <span style="color:var(--text-muted)">No reports yet</span>
             {% endif %}
           </dd>
         </div>
-        {% endif %}
       </dl>
-      {% if p.last_run_at %}
-      <p style="font-size:12px;color:var(--text-muted);margin:0">
-        <i class="ti ti-clock" aria-hidden="true"></i> Last run {{ p.last_run_at }}
+      <p class="project-card-footer">
+        <i class="ti ti-clock" aria-hidden="true"></i>
+        {% if p.last_run_at %}Last run {{ p.last_run_at }}{% else %}Never run{% endif %}
       </p>
-      {% endif %}
-      <div style="margin-top:.75rem;font-size:12px;color:var(--text-accent)">
-        View detail <i class="ti ti-arrow-right" aria-hidden="true"></i>
-      </div>
     </div>
   </a>
   {% endfor %}
