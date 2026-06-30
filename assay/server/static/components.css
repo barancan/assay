@@ -1,5 +1,7 @@
 /* Assay shared component library — all values reference tokens.css */
 
+[x-cloak] { display: none !important; }
+
 /* ── Reset ─────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; }
 
@@ -385,6 +387,7 @@ code {
   display: grid;
   grid-template-columns: repeat(auto-fill, 280px);
   gap: 1rem;
+  align-items: start;
 }
 
 /* Fixed-size project card — always sized for a fully-populated card */
@@ -410,6 +413,9 @@ code {
   gap: .35rem .75rem;
   margin-bottom: 0;
   flex: 1;
+  grid-template-columns: 1fr 1fr;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .project-card-footer {

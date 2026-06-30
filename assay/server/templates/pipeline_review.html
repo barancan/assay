@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+{% from "_macros.html" import state_badge, check_type_badge %}
+{% block title %}Review v{{ version_number }} — {{ pipeline_name }} — Assay{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <a href="/projects/{{ project_name | urlencode }}" class="btn btn-ghost"
+     style="padding:.3rem .5rem;font-size:13px">
+    <i class="ti ti-arrow-left" aria-hidden="true"></i> {{ project_name }}
+  </a>
+  <h1 style="margin:0">Review pipeline</h1>
+  {% if version_status == 'active' %}
+    <span class="badge badge-pass"><i class="ti ti-circle-check" aria-hidden="true"></i> Active</span>
+  {% elif version_status == 'archived' %}
+    <span class="badge badge-neutral">Archived</span>
+  {% else %}
+    <span class="badge badge-draft">Draft</span>
+  {% endif %}
+</div>
+
+<!-- Pipeline info -->
+<div class="card">
+  <dl class="meta">
+    <div><dt>Pipeline</dt><dd>{{ pipeline_name }}</dd></div>
+    <div><dt>Version</dt><dd>v{{ version_number }}</dd></div>
+    <div><dt>Status</dt><dd>{{ version_status }}</dd></div>
+    <div><dt>Created by</dt><dd>{{ created_by or '—' }}</dd></div>
+    <div><dt>Content hash</dt><dd><code>{{ content_hash[:12] }}…</code></dd></div>
+    {% if activated_by %}
+    <div><dt>Activated by</dt><dd>{{ activated_by }}</dd></div>
+    {% endif %}
+    {% if activated_at %}
+    <div><dt>Activated at</dt><dd>{{ activated_at }}</dd></div>
+    {% endif %}
+    {% if req_refs %}
+    <div><dt>Requirements</dt><dd>{{ req_refs | join(', ') }}</dd></div>
+    {% endif %}
+  </dl>
+</div>
+
+<!-- Check summary / coverage -->
+<div class="card">
+  {% set template_count = checks | selectattr('type', 'equalto', 'template') | list | length %}
+  {% set generated_count = checks | selectattr('type', 'equalto', 'generated') | list | length %}
+  {% set judge_count = checks | selectattr('type', 'equalto', 'judge') | list | length %}
+  <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+    <h2 style="margin:0">{{ check_count }} check{{ 's' if check_count != 1 }}</h2>
+    {% if template_count %}
+      <span class="badge badge-template">{{ template_count }} template</span>
+    {% endif %}
+    {% if generated_count %}
+      <span class="badge badge-generated">{{ generated_count }} generated</span>
+    {% endif %}
+    {% if judge_count %}
+      <span class="badge badge-judge">{{ judge_count }} judge</span>
+    {% endif %}
+  </div>
+  {% if check_count > 0 %}
+  <!-- Coverage bar -->
+  <div style="margin-top:.85rem;background:var(--surface-1);border-radius:var(--radius);height:6px;overflow:hidden">
+    {% set pct_t = (template_count / check_count * 100) | int %}
+    {% set pct_g = (generated_count / check_count * 100) | int %}
+    {% set pct_j = (judge_count / check_count * 100) | int %}
+    <div style="display:flex;height:100%">
+      <div style="width:{{ pct_t }}%;background:var(--text-muted)"></div>
+      <div style="width:{{ pct_g }}%;background:var(--text-warning)"></div>
+      <div style="width:{{ pct_j }}%;background:var(--text-accent)"></div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Check list -->
+{% for chk in checks %}
+<div class="card" id="check-row-{{ loop.index0 }}" style="padding:.85rem 1rem">
+  <div style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin-bottom:.5rem">
+    {{ check_type_badge(chk.type) }}
+    <span style="font-size:13px;color:var(--text-muted)">
+      {{ chk.suite_id }}<span style="margin:0 .2rem;opacity:.5">/</span>{{ chk.case_id }}
+    </span>
+    {% if chk.type == 'template' and chk.uses %}
+      <code style="font-size:12px;color:var(--text-secondary)">{{ chk.uses }}</code>
+    {% elif chk.type == 'generated' and chk.key %}
+      <code style="font-size:12px;color:var(--text-secondary)">{{ chk.key }}</code>
+    {% elif chk.type == 'judge' and chk.key %}
+      <code style="font-size:12px;color:var(--text-secondary)">{{ chk.key }}</code>
+    {% endif %}
+  </div>
+
+  {% if chk.assertion %}
+  <p style="margin:.25rem 0 .5rem;font-size:14px;color:var(--text-primary)">{{ chk.assertion }}</p>
+  {% endif %}
+
+  {% if chk.type == 'template' and chk.params %}
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:.25rem">
+      {% for k, v in chk.params.items() %}
+        <code>{{ k }}: {{ v }}</code>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {% if chk.type == 'generated' %}
+  <div x-data="{ editing: false }" style="margin-top:.5rem">
+    {% if chk.source %}
+    <details>
+      <summary style="font-size:13px">
+        <i class="ti ti-code" aria-hidden="true"></i> View source
+      </summary>
+      <pre style="margin-top:.5rem">{{ chk.source }}</pre>
+    </details>
+    {% else %}
+    <p style="font-size:13px;color:var(--text-muted);font-style:italic">No source generated yet.</p>
+    {% endif %}
+
+    {% if version_status == 'draft' %}
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem;align-items:center">
+      <button class="btn btn-ghost" style="font-size:12px"
+              @click="editing = !editing">
+        <i class="ti ti-edit" aria-hidden="true"></i>
+        <span x-text="editing ? 'Cancel' : 'Edit'"></span>
+      </button>
+      <button class="btn btn-ghost" style="font-size:12px"
+              hx-post="/pipelines/versions/{{ version_id }}/checks/{{ chk.key }}/regenerate"
+              hx-headers='{"X-Assay-User": {{ identity | tojson }}}'
+              hx-target="#check-regen-result-{{ loop.index0 }}"
+              hx-swap="innerHTML"
+              hx-indicator="#check-regen-spinner-{{ loop.index0 }}">
+        <i class="ti ti-sparkles" aria-hidden="true"></i> Regenerate
+        <span id="check-regen-spinner-{{ loop.index0 }}"
+              class="htmx-indicator" style="font-size:11px;color:var(--text-muted)">…</span>
+      </button>
+      <div id="check-regen-result-{{ loop.index0 }}"></div>
+    </div>
+
+    <form x-show="editing" style="margin-top:.5rem"
+          hx-patch="/pipelines/versions/{{ version_id }}/checks/{{ chk.key }}"
+          hx-headers='{"X-Assay-User": {{ identity | tojson }}, "Content-Type": "application/json"}'
+          hx-ext="json-enc"
+          hx-target="#check-save-result-{{ loop.index0 }}"
+          hx-swap="innerHTML">
+      <textarea name="source" rows="12"
+                style="width:100%;font-family:monospace;font-size:12px;
+                       background:var(--surface-0);color:var(--text-primary);
+                       border:1px solid var(--border);border-radius:var(--radius);
+                       padding:.5rem;resize:vertical">{{ chk.source or '' }}</textarea>
+      <div style="display:flex;gap:.5rem;margin-top:.35rem;align-items:center">
+        <button type="submit" class="btn btn-primary" style="font-size:12px">
+          <i class="ti ti-device-floppy" aria-hidden="true"></i> Save
+        </button>
+        <div id="check-save-result-{{ loop.index0 }}" style="font-size:12px"></div>
+      </div>
+    </form>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if chk.type == 'judge' %}
+  <div style="margin-top:.5rem">
+    {% if chk.rubric_text %}
+    <details>
+      <summary style="font-size:13px">
+        <i class="ti ti-clipboard-list" aria-hidden="true"></i> View rubric
+      </summary>
+      <pre style="margin-top:.5rem">{{ chk.rubric_text }}</pre>
+    </details>
+    {% else %}
+    <p style="font-size:13px;color:var(--text-muted);font-style:italic">No rubric stored.</p>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% else %}
+<div class="card" style="text-align:center;padding:2rem 0">
+  <i class="ti ti-list-check" style="font-size:2rem;color:var(--text-muted);display:block;margin-bottom:.5rem" aria-hidden="true"></i>
+  <p style="color:var(--text-secondary);font-size:14px;font-weight:500;margin:0 0 .25rem">No checks defined</p>
+  <p style="color:var(--text-muted);font-size:13px;margin:0">
+    Generate a pipeline first to create checks automatically.
+  </p>
+</div>
+{% endfor %}
+
+<!-- Activation gate -->
+{% if version_status == 'draft' %}
+<div class="card" id="activation-gate"
+     style="border:1px solid var(--border-warning);background:var(--bg-warning)">
+  <h2 style="margin:0 0 .5rem;color:var(--text-warning)">
+    <i class="ti ti-shield-check" aria-hidden="true"></i> Activation gate
+  </h2>
+  <p style="font-size:14px;color:var(--text-primary);margin:0 0 .75rem">
+    Review the {{ check_count }} check{{ 's' if check_count != 1 }} above, then activate this
+    version to allow it to run. Only <strong>reviewer</strong> or <strong>admin</strong> accounts
+    can activate.
+  </p>
+  <button class="btn btn-primary"
+          hx-post="/pipelines/versions/{{ version_id }}/activate"
+          hx-headers='{"X-Assay-User": {{ identity | tojson }}}'
+          hx-target="#activation-gate"
+          hx-swap="outerHTML"
+          hx-confirm="Activate v{{ version_number }}? This will archive the previous active version.">
+    <i class="ti ti-player-play" aria-hidden="true"></i>
+    Activate v{{ version_number }}
+  </button>
+</div>
+
+{% elif version_status == 'active' %}
+<div class="card" style="border:1px solid var(--border-success,var(--border))">
+  <h2 style="margin:0 0 .4rem">
+    <i class="ti ti-circle-check" style="color:var(--text-success)" aria-hidden="true"></i>
+    Version active
+  </h2>
+  <p style="font-size:14px;color:var(--text-secondary);margin:0">
+    Activated{% if activated_by %} by <strong>{{ activated_by }}</strong>{% endif %}
+    {% if activated_at %} on {{ activated_at }}{% endif %}.
+    This version is live and can be used to trigger runs.
+  </p>
+  <div style="margin-top:.75rem;display:flex;gap:.5rem;flex-wrap:wrap">
+    <a href="/projects/{{ project_name | urlencode }}" class="btn">
+      <i class="ti ti-arrow-left" aria-hidden="true"></i> Back to project
+    </a>
+    <button class="btn btn-primary"
+            hx-post="/pipelines/versions/{{ version_id }}/run"
+            hx-headers='{"X-Assay-User": {{ identity | tojson }}}'
+            hx-disabled-elt="this">
+      <i class="ti ti-player-play" aria-hidden="true"></i> Run pipeline
+    </button>
+  </div>
+</div>
+
+{% elif version_status == 'archived' %}
+<div class="card" style="opacity:.7">
+  <h2 style="margin:0 0 .4rem">
+    <i class="ti ti-archive" aria-hidden="true"></i> Archived
+  </h2>
+  <p style="font-size:14px;color:var(--text-muted);margin:0">
+    This version has been superseded by a newer active version.
+  </p>
+</div>
+{% endif %}
+
+{% endblock %}

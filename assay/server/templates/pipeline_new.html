@@ -67,13 +67,16 @@
 }">
 
   <!-- Step tabs -->
-  <div style="display:flex;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:1.25rem">
+  <div style="display:flex;align-items:center;margin-bottom:1.25rem;gap:.25rem">
     {% for label in ['Define', 'Connect', 'Review', 'Run'] %}
     {% set n = loop.index %}
-    <div style="flex:1;padding:.5rem .75rem;font-size:13px;font-weight:500;text-align:center;background:var(--surface-1)"
-         :style="step === {{ n }} ? 'background:var(--bg-accent);color:var(--text-accent)' : 'color:var(--text-muted)'">
-      {{ n }} · {{ label }}
+    <div style="padding:.4rem .85rem;font-size:13px;font-weight:500;border-radius:var(--radius)"
+         :style="step === {{ n }} ? {'background':'var(--bg-accent)','color':'var(--text-accent)','borderRadius':'var(--radius)'} : {'color':'var(--text-muted)'}">
+      {{ label }}
     </div>
+    {% if not loop.last %}
+    <i class="ti ti-chevron-right" aria-hidden="true" style="font-size:12px;color:var(--text-muted);opacity:.5;flex-shrink:0"></i>
+    {% endif %}
     {% endfor %}
   </div>
 
@@ -107,16 +110,27 @@
           <input x-model="name" type="text" placeholder="my-pipeline" style="width:100%">
         </div>
       </div>
-      <div style="display:flex;gap:.5rem;margin-top:1rem;justify-content:flex-end">
+      <div style="display:flex;gap:.5rem;margin-top:1rem;align-items:center">
+        {% if resume_data %}
         <button type="button" class="btn btn-ghost"
-                @click="saveDraft('define')">
-          <i class="ti ti-device-floppy" aria-hidden="true"></i> Save draft
+                style="color:var(--text-danger)"
+                hx-delete="/pipelines/versions/{{ resume_data.version_id }}"
+                hx-confirm="Delete this draft? This cannot be undone."
+                hx-on:htmx:after-request="if(event.detail.successful) window.location='/pipelines'">
+          <i class="ti ti-trash" aria-hidden="true"></i> Delete draft
         </button>
-        <button type="button" class="btn btn-primary"
-                :disabled="!requirements.trim() || !project.trim() || !name.trim()"
-                @click="loadPreview(); step = 2">
-          Continue <i class="ti ti-arrow-right" aria-hidden="true"></i>
-        </button>
+        {% endif %}
+        <div style="margin-left:auto;display:flex;gap:.5rem">
+          <button type="button" class="btn btn-ghost"
+                  @click="saveDraft('define')">
+            <i class="ti ti-device-floppy" aria-hidden="true"></i> Save draft
+          </button>
+          <button type="button" class="btn btn-primary"
+                  :disabled="!requirements.trim() || !project.trim() || !name.trim()"
+                  @click="loadPreview(); step = 2">
+            Continue <i class="ti ti-arrow-right" aria-hidden="true"></i>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -188,16 +202,27 @@
       </div>
     </div>
 
-    <div style="display:flex;gap:.5rem;margin-top:1rem;justify-content:flex-end">
-      <button type="button" class="btn btn-ghost" @click="step = 1">
-        <i class="ti ti-arrow-left" aria-hidden="true"></i> Back
+    <div style="display:flex;gap:.5rem;margin-top:1rem;align-items:center">
+      {% if resume_data %}
+      <button type="button" class="btn btn-ghost"
+              style="color:var(--text-danger)"
+              hx-delete="/pipelines/versions/{{ resume_data.version_id }}"
+              hx-confirm="Delete this draft? This cannot be undone."
+              hx-on:htmx:after-request="if(event.detail.successful) window.location='/pipelines'">
+        <i class="ti ti-trash" aria-hidden="true"></i> Delete draft
       </button>
-      <button type="button" class="btn btn-ghost" @click="saveDraft('connect')">
-        <i class="ti ti-device-floppy" aria-hidden="true"></i> Save draft
-      </button>
-      <button type="button" class="btn btn-primary" @click="generate()">
-        <i class="ti ti-bolt" aria-hidden="true"></i> Generate pipeline
-      </button>
+      {% endif %}
+      <div style="margin-left:auto;display:flex;gap:.5rem">
+        <button type="button" class="btn btn-ghost" @click="step = 1">
+          <i class="ti ti-arrow-left" aria-hidden="true"></i> Back
+        </button>
+        <button type="button" class="btn btn-ghost" @click="saveDraft('connect')">
+          <i class="ti ti-device-floppy" aria-hidden="true"></i> Save draft
+        </button>
+        <button type="button" class="btn btn-primary" @click="generate()">
+          <i class="ti ti-bolt" aria-hidden="true"></i> Generate pipeline
+        </button>
+      </div>
     </div>
   </div>
 

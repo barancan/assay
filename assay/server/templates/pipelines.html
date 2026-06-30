@@ -10,7 +10,8 @@
 </div>
 
 {% if drafts %}
-<div class="card" style="padding:0;overflow-x:auto">
+<div class="card" style="padding:0;overflow:hidden">
+  <div style="overflow-x:auto">
   <table>
     <thead>
       <tr>
@@ -58,6 +59,7 @@
     {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 {% else %}
 <div class="card" style="text-align:center;padding:3rem 1.5rem">

@@ -1,7 +1,7 @@
 """CRUD operations for Pipeline and PipelineVersion records."""
 from __future__ import annotations
 import datetime as dt
-from pathlib import Path
+from pathlib import Path  # used by regenerate_check stub source naming
 from sqlalchemy import func
 from ..store import session_scope
 from ..store.models import Pipeline, PipelineVersion, User
@@ -160,6 +160,61 @@ def update_step_reached(version_id: int, step: str) -> None:
         if pv is None:
             raise ValueError(f"PipelineVersion {version_id} not found")
         pv.step_reached = step
+
+
+def regenerate_check(version_id: int, check_path: str, actor: str) -> int:
+    """Clone a draft PipelineVersion with one generated-check source regenerated.
+
+    Only works on draft versions. Returns the new PipelineVersion id.
+    """
+    with session_scope() as s:
+        pv = s.get(PipelineVersion, version_id)
+        if pv is None:
+            raise ValueError(f"PipelineVersion {version_id} not found")
+        if pv.status != "draft":
+            raise ValueError(
+                f"can only regenerate checks on a draft version (status: {pv.status})"
+            )
+        existing = pv.generated_sources or {}
+        if check_path not in existing:
+            raise ValueError(f"generated check '{check_path}' not found in this version")
+
+        # Find the assertion for this check in config so the stub is meaningful.
+        assertion = ""
+        for suite in (pv.config or {}).get("suites", []):
+            for case in suite.get("cases", []):
+                for chk in case.get("checks", []):
+                    if chk.get("uses") == check_path:
+                        assertion = case.get("id", check_path)
+
+        fn_name = Path(check_path).stem.replace("-", "_")
+        new_source = (
+            f"# Regenerated check: {assertion}\n"
+            f"def {fn_name}(response, **kwargs):\n"
+            f"    # TODO: implement check logic\n"
+            f"    return True\n"
+        )
+        new_sources = {**existing, check_path: new_source}
+        pid = pv.pipeline_id
+        config = dict(pv.config or {})
+        rubrics = dict(pv.rubrics or {})
+
+    return create_version(pid, config, new_sources, rubrics, actor).id
+
+
+def update_check_source(version_id: int, check_path: str, source: str) -> None:
+    """Inline-edit the source for a generated check in a draft PipelineVersion."""
+    with session_scope() as s:
+        pv = s.get(PipelineVersion, version_id)
+        if pv is None:
+            raise ValueError(f"PipelineVersion {version_id} not found")
+        if pv.status != "draft":
+            raise ValueError(
+                f"can only edit checks on a draft version (status: {pv.status})"
+            )
+        sources = dict(pv.generated_sources or {})
+        sources[check_path] = source
+        pv.generated_sources = sources
 
 
 def get_version(version_id: int) -> PipelineVersion | None:

@@ -207,8 +207,29 @@ def logout():
 @app.get("/pipelines")
 def list_pipelines(request: Request):
     if "text/html" in request.headers.get("accept", ""):
-        # Drafts now live inside Project detail — redirect browsers to /projects.
-        return RedirectResponse("/projects", status_code=302)
+        with session_scope() as s:
+            rows = (
+                s.query(PipelineVersion, Pipeline)
+                .join(Pipeline, PipelineVersion.pipeline_id == Pipeline.id)
+                .filter(PipelineVersion.status == "draft")
+                .order_by(PipelineVersion.id.desc())
+                .all()
+            )
+            draft_list = [
+                {
+                    "id": pv.id,
+                    "version_number": pv.version_number,
+                    "pipeline_name": pipe.name,
+                    "project": pipe.project,
+                    "step_reached": pv.step_reached or "define",
+                    "created_at": str(pv.created_at)[:10],
+                }
+                for pv, pipe in rows
+            ]
+        return templates.TemplateResponse(request, "pipelines.html", {
+            "drafts": draft_list,
+            "identity": _identity(request),
+        })
     with session_scope() as s:
         return [
             {"id": p.id, "project": p.project, "name": p.name,
@@ -454,8 +475,11 @@ def list_projects(request: Request):
 
 
 @app.post("/projects")
-def create_project(request: Request, name: str = Form(...)):
-    return RedirectResponse("/projects", status_code=303)
+def create_project(name: str = Form(...)):
+    return RedirectResponse(
+        f"/pipelines/new?project={_urlquote(name, safe='')}",
+        status_code=303,
+    )
 
 
 @app.get("/projects/{project_name}", response_class=HTMLResponse)
@@ -541,6 +565,7 @@ def project_detail(request: Request, project_name: str):
                 "id": pipe.id,
                 "name": pipe.name,
                 "active_version": active_pv.version_number if active_pv else None,
+                "active_version_id": active_pv.id if active_pv else None,
                 "last_verdict": last_verdict,
                 "report_count": pipe_report_count,
                 "last_run_at": last_pipe_run,
@@ -597,6 +622,35 @@ def delete_draft_version(version_id: int, request: Request):
     return {"ok": True}
 
 
+@app.post("/pipelines/versions/{version_id}/run")
+def trigger_run(
+    version_id: int,
+    request: Request,
+    x_assay_user: str | None = Header(default=None),
+):
+    from ..engine import execute_run, submit_for_review
+    from ..reporting import export_report
+    actor = _require_identity(request, x_assay_user)
+    try:
+        run_id = execute_run(
+            pipeline_version_id=version_id,
+            trigger="manual",
+            triggered_by=actor,
+        )
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except Exception as e:
+        raise HTTPException(422, str(e)[:200])
+    with session_scope() as s:
+        rep = s.query(Report).filter_by(run_id=run_id).one()
+        rep_id = rep.id
+    submit_for_review(rep_id, actor=actor)
+    export_report(run_id)
+    if _is_htmx(request):
+        return Response(headers={"HX-Redirect": f"/reports/{rep_id}"})
+    return {"ok": True, "run_id": run_id, "report_id": rep_id}
+
+
 @app.get("/pipelines/{pipeline_id}/versions")
 def get_pipeline_versions(pipeline_id: int):
     with session_scope() as s:
@@ -645,16 +699,150 @@ def import_pipeline(body: ImportBody):
     return {"pipeline_version_id": pv.id, "status": pv.status, "content_hash": pv.content_hash}
 
 
-@app.post("/pipelines/versions/{version_id}/activate")
-def activate_pipeline_version(version_id: int, x_assay_user: str = Header(...)):
-    from ..pipeline import activate_version
+def _build_check_list(pv) -> list[dict]:
+    """Flatten config.suites[].cases[].checks[] into a list with resolved source/rubric."""
+    checks = []
+    for suite in (pv.config or {}).get("suites", []):
+        for case in suite.get("cases", []):
+            for chk in case.get("checks", []):
+                ctype = chk.get("type", "template")
+                key = None
+                source = None
+                rubric_text = None
+                if ctype == "generated":
+                    key = chk.get("uses", "")
+                    source = (pv.generated_sources or {}).get(key, "")
+                elif ctype == "judge":
+                    key = chk.get("rubric", "")
+                    rubric_text = (pv.rubrics or {}).get(key, "")
+                checks.append({
+                    "suite_id": suite.get("id", ""),
+                    "case_id": case.get("id", ""),
+                    "type": ctype,
+                    "key": key,
+                    "uses": chk.get("uses"),
+                    "rubric": chk.get("rubric"),
+                    "assertion": chk.get("assertion", ""),
+                    "params": chk.get("with", {}),
+                    "source": source,
+                    "rubric_text": rubric_text,
+                })
+    return checks
+
+
+@app.get("/pipelines/{pipeline_id}/versions/{version_id}/review", response_class=HTMLResponse)
+def pipeline_review_page(request: Request, pipeline_id: int, version_id: int):
+    with session_scope() as s:
+        pipe = s.get(Pipeline, pipeline_id)
+        if not pipe:
+            raise HTTPException(404, "pipeline not found")
+        pv = s.get(PipelineVersion, version_id)
+        if not pv or pv.pipeline_id != pipeline_id:
+            raise HTTPException(404, "version not found for this pipeline")
+        checks = _build_check_list(pv)
+        req_refs = {
+            suite.get("requirement_ref")
+            for suite in (pv.config or {}).get("suites", [])
+            if suite.get("requirement_ref")
+        }
+        ctx = {
+            "pipeline_id": pipe.id,
+            "pipeline_name": pipe.name,
+            "project_name": pipe.project,
+            "version_id": pv.id,
+            "version_number": pv.version_number,
+            "version_status": pv.status,
+            "content_hash": pv.content_hash,
+            "created_by": pv.created_by,
+            "activated_by": pv.activated_by,
+            "activated_at": str(pv.activated_at)[:19] if pv.activated_at else None,
+            "checks": checks,
+            "check_count": len(checks),
+            "req_refs": sorted(r for r in req_refs if r),
+            "identity": _identity(request),
+        }
+    return templates.TemplateResponse(request, "pipeline_review.html", ctx)
+
+
+class CheckEditBody(BaseModel):
+    source: str
+
+
+@app.patch("/pipelines/versions/{version_id}/checks/{check_path:path}")
+def patch_check_source(
+    version_id: int,
+    check_path: str,
+    body: CheckEditBody,
+    request: Request,
+    x_assay_user: str | None = Header(default=None),
+):
+    from ..pipeline.service import update_check_source
+    actor = _require_identity(request, x_assay_user)
     try:
-        activate_version(version_id, x_assay_user)
+        update_check_source(version_id, check_path, body.source)
+    except ValueError as e:
+        status = 409 if "draft" in str(e) else 404
+        raise HTTPException(status, str(e))
+    if _is_htmx(request):
+        return HTMLResponse(
+            f'<span class="badge badge-pass" style="font-size:12px">'
+            f'<i class="ti ti-check" aria-hidden="true"></i> Saved</span>',
+        )
+    return {"ok": True, "version_id": version_id, "check_path": check_path}
+
+
+@app.post("/pipelines/versions/{version_id}/checks/{check_path:path}/regenerate")
+def regenerate_check_route(
+    version_id: int,
+    check_path: str,
+    request: Request,
+    x_assay_user: str | None = Header(default=None),
+):
+    from ..pipeline.service import regenerate_check
+    actor = _require_identity(request, x_assay_user)
+    try:
+        new_version_id = regenerate_check(version_id, check_path, actor)
+    except ValueError as e:
+        status = 409 if "draft" in str(e) else 404
+        raise HTTPException(status, str(e))
+    if _is_htmx(request):
+        with session_scope() as s:
+            pv = s.get(PipelineVersion, new_version_id)
+            # Find the new source for this check
+            new_source = (pv.generated_sources or {}).get(check_path, "")
+        return HTMLResponse(
+            f'<div class="banner" style="margin-bottom:.5rem">'
+            f'<i class="ti ti-sparkles" aria-hidden="true"></i> '
+            f'Regenerated — new draft v{pv.version_number} created '
+            f'(<a href="/pipelines/{pv.pipeline_id}/versions/{pv.id}/review">review it</a>)</div>'
+            f'<pre><code>{new_source}</code></pre>'
+        )
+    return {"ok": True, "new_version_id": new_version_id}
+
+
+@app.post("/pipelines/versions/{version_id}/activate")
+def activate_pipeline_version(
+    version_id: int,
+    request: Request,
+    x_assay_user: str | None = Header(default=None),
+):
+    from ..pipeline import activate_version
+    actor = _require_identity(request, x_assay_user)
+    try:
+        activate_version(version_id, actor)
     except PermissionError as e:
         raise HTTPException(403, str(e))
     except ValueError as e:
         raise HTTPException(404, str(e))
-    return {"ok": True, "version_id": version_id, "activated_by": x_assay_user}
+    if _is_htmx(request):
+        with session_scope() as s:
+            pv = s.get(PipelineVersion, version_id)
+            pipe = s.get(Pipeline, pv.pipeline_id) if pv else None
+            project = pipe.project if pipe else ""
+        return Response(
+            headers={"HX-Redirect": f"/projects/{_urlquote(project, safe='')}"}
+        )
+    return {"ok": True, "version_id": version_id, "activated_by": actor}
 
 
 # ── Reports ────────────────────────────────────────────────────────────────

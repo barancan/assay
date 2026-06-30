@@ -74,6 +74,13 @@
   {% if pipelines %}
   {% for pipe in pipelines %}
   <div style="padding:.6rem 0;border-bottom:1px solid var(--border)">
+    {% if pipe.drafts %}
+      {% set edit_href = "/pipelines/new?resume=" ~ pipe.drafts[0].id %}
+    {% elif pipe.active_version_id %}
+      {% set edit_href = "/pipelines/" ~ pipe.id ~ "/versions/" ~ pipe.active_version_id ~ "/review" %}
+    {% else %}
+      {% set edit_href = "/pipelines/new?project=" ~ (project_name | urlencode) %}
+    {% endif %}
     <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap">
       <span style="font-weight:500;font-size:14px">{{ pipe.name }}</span>
       {% if pipe.active_version %}
@@ -92,9 +99,22 @@
         <i class="ti ti-clock" aria-hidden="true"></i> {{ pipe.last_run_at }}
       </span>
       {% endif %}
+      <div style="margin-left:auto;display:flex;gap:.35rem;align-items:center">
+        <a href="{{ edit_href }}" class="btn" style="font-size:12px">
+          <i class="ti ti-edit" aria-hidden="true"></i> Edit
+        </a>
+        {% if pipe.active_version_id %}
+        <button class="btn btn-primary" style="font-size:12px"
+                hx-post="/pipelines/versions/{{ pipe.active_version_id }}/run"
+                hx-headers='{"X-Assay-User": {{ identity | tojson }}}'
+                hx-disabled-elt="this">
+          <i class="ti ti-player-play" aria-hidden="true"></i> Run
+        </button>
+        {% endif %}
+      </div>
     </div>
     {% for draft in pipe.drafts %}
-    <div style="display:flex;gap:.5rem;align-items:center;margin-top:.35rem;padding:.3rem .5rem;
+    <div id="draft-row-{{ draft.id }}" style="display:flex;gap:.5rem;align-items:center;margin-top:.35rem;padding:.3rem .5rem;
                 background:var(--surface-1);border-radius:var(--radius);font-size:13px">
       <span class="badge badge-draft">Draft</span>
       <span style="color:var(--text-secondary)">v{{ draft.version_number }}</span>
