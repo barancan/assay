@@ -211,23 +211,25 @@ def list_pipelines(request: Request):
             rows = (
                 s.query(PipelineVersion, Pipeline)
                 .join(Pipeline, PipelineVersion.pipeline_id == Pipeline.id)
-                .filter(PipelineVersion.status == "draft")
+                .filter(PipelineVersion.status.in_(["draft", "active"]))
                 .order_by(PipelineVersion.id.desc())
                 .all()
             )
-            draft_list = [
+            pipeline_list = [
                 {
                     "id": pv.id,
+                    "pipeline_id": pipe.id,
                     "version_number": pv.version_number,
                     "pipeline_name": pipe.name,
                     "project": pipe.project,
+                    "status": pv.status,
                     "step_reached": pv.step_reached or "define",
                     "created_at": str(pv.created_at)[:10],
                 }
                 for pv, pipe in rows
             ]
         return templates.TemplateResponse(request, "pipelines.html", {
-            "drafts": draft_list,
+            "pipelines": pipeline_list,
             "identity": _identity(request),
         })
     with session_scope() as s:

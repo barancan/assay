@@ -84,14 +84,14 @@ def test_create_project_redirects_to_wizard(client):
 
 # ── Fix 4: Drafts page ───────────────────────────────────────────────────────
 
-def test_drafts_page_empty_state(client):
-    """GET /pipelines (HTML) with no drafts returns 200 with empty-state markup."""
+def test_pipelines_page_empty_state(client):
+    """GET /pipelines (HTML) with no pipelines returns 200 with empty-state markup."""
     resp = client.get("/pipelines", headers={"Accept": "text/html"})
     assert resp.status_code == 200
-    assert "No draft pipelines" in resp.text or "draft" in resp.text.lower()
+    assert "No pipelines yet" in resp.text
 
 
-def test_drafts_page_lists_draft(client):
+def test_pipelines_page_lists_draft(client):
     """GET /pipelines (HTML) shows existing draft versions."""
     _make_draft_version()
     resp = client.get("/pipelines", headers={"Accept": "text/html"})
@@ -100,13 +100,13 @@ def test_drafts_page_lists_draft(client):
     assert "draft-proj" in resp.text
 
 
-def test_drafts_page_excludes_active(client):
-    """GET /pipelines (HTML) does NOT list active pipeline versions."""
+def test_pipelines_page_lists_active(client):
+    """GET /pipelines (HTML) now shows active pipeline versions too."""
     _make_active_version()
     resp = client.get("/pipelines", headers={"Accept": "text/html"})
     assert resp.status_code == 200
-    # The active version's pipeline name should not appear in the drafts table
-    assert "test-pipe" not in resp.text
+    assert "test-pipe" in resp.text
+    assert "Active" in resp.text
 
 
 # ── Fix 3: Trigger run ───────────────────────────────────────────────────────
