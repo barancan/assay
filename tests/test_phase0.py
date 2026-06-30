@@ -55,20 +55,19 @@ def _make_run_and_report():
 # ── Nav ────────────────────────────────────────────────────────────────────
 
 def test_shell_nav_present(client):
-    """GET / returns HTML with top nav including Runs link (ti-chart-bar icon)."""
+    """GET / returns HTML with top nav including Pipelines link (ti-git-branch icon)."""
     resp = client.get("/")
     assert resp.status_code == 200
     assert "<nav" in resp.text
-    assert "ti-chart-bar" in resp.text
+    assert "ti-git-branch" in resp.text
 
 
 def test_shell_nav_has_all_sections(client):
-    """Top nav contains the four IA sections (Pipelines removed, content moved to Project detail)."""
+    """Top nav contains the four IA sections: Projects, Pipelines, Reports, Settings."""
     resp = client.get("/")
     html = resp.text
-    for label in ("Projects", "Runs", "Reports", "Settings"):
+    for label in ("Projects", "Pipelines", "Reports", "Settings"):
         assert label in html, f"Nav missing: {label}"
-    assert "Pipelines" not in html.split('<nav')[1].split('</nav>')[0] or True
 
 
 def test_dark_theme_default(client):
