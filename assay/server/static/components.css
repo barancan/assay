@@ -380,6 +380,46 @@ code {
   outline-offset: 2px;
 }
 
+/* Project grid */
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 280px);
+  gap: 1rem;
+}
+
+/* Fixed-size project card — always sized for a fully-populated card */
+.project-card {
+  margin-bottom: 0;
+  width: 280px;
+  height: 220px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.project-card-title {
+  margin: 0 0 .75rem;
+  font-size: 1rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-card-meta {
+  gap: .35rem .75rem;
+  margin-bottom: 0;
+  flex: 1;
+}
+
+.project-card-footer {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: .65rem 0 0;
+  padding-top: .55rem;
+  border-top: 1px solid var(--border);
+}
+
 /* Clickable project card */
 .project-card-link {
   display: block;
