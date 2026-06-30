@@ -56,6 +56,28 @@ def create_version(
         return s.get(PipelineVersion, pv_id)
 
 
+def update_version_config(
+    version_id: int,
+    config: dict,
+    generated_sources: dict | None = None,
+    rubrics: dict | None = None,
+) -> None:
+    """Replace config of an existing draft PipelineVersion in place."""
+    sources = generated_sources or {}
+    rubs = rubrics or {}
+    ch = content_hash(config, sources, rubs)
+    with session_scope() as s:
+        pv = s.get(PipelineVersion, version_id)
+        if pv is None:
+            raise ValueError(f"PipelineVersion {version_id} not found")
+        if pv.status != "draft":
+            raise ValueError(f"Can only update draft versions (status: {pv.status})")
+        pv.config = config
+        pv.generated_sources = sources
+        pv.rubrics = rubs
+        pv.content_hash = ch
+
+
 def import_from_yaml(
     spec_path: str,
     project: str,

@@ -265,12 +265,18 @@ def pipeline_new_page(request: Request, resume: int | None = None, project: str 
             if pv and pv.status == "draft":
                 from ..store.models import Pipeline as _P
                 pipe = s.get(_P, pv.pipeline_id)
+                cfg = pv.config if isinstance(pv.config, dict) else {}
+                target = cfg.get("target", {}) or {}
                 resume_data = {
                     "version_id": pv.id,
-                    "requirements": pv.config.get("requirements", "") if isinstance(pv.config, dict) else "",
+                    "requirements": cfg.get("requirements", ""),
                     "step_reached": pv.step_reached or "define",
                     "project": pipe.project if pipe else "",
                     "name": pipe.name if pipe else "",
+                    "adapter": target.get("adapter") or "mock",
+                    "model": target.get("model") or "",
+                    "endpoint": target.get("endpoint") or "",
+                    "key_env": target.get("key_env") or "",
                 }
     return templates.TemplateResponse(request, "pipeline_new.html", {
         "starter_templates": _STARTER_TEMPLATES,
@@ -338,6 +344,7 @@ class GenerateBody(BaseModel):
     requirements: str
     adapter_spec: dict
     judge_spec: dict | None = None
+    pipeline_version_id: int | None = None
 
 
 @app.post("/pipelines/generate")
@@ -348,23 +355,33 @@ def pipeline_generate(
 ):
     from ..generator.build import derive_intents, intents_to_spec
     from ..pipeline import create_version
-    from ..pipeline.service import update_step_reached
+    from ..pipeline.service import update_step_reached, activate_version, update_version_config
     actor = _require_identity(request, x_assay_user)
     intents = derive_intents(body.requirements, judge=None)
     judges = {"primary": body.judge_spec} if body.judge_spec else {}
     spec_dict = intents_to_spec(body.project, intents, body.adapter_spec, judges)
-    with session_scope() as s:
-        pipe = s.query(Pipeline).filter_by(project=body.project, name=body.name).one_or_none()
-        if pipe is None:
-            pipe = Pipeline(project=body.project, name=body.name, created_by=actor)
-            s.add(pipe)
-            s.flush()
-        pid = pipe.id
-    pv = create_version(pid, spec_dict, {}, {}, actor)
-    update_step_reached(pv.id, "review")
+    spec_dict["requirements"] = body.requirements  # persist so wizard can restore it
+    if body.pipeline_version_id:
+        update_version_config(body.pipeline_version_id, spec_dict, {}, {})
+        version_id = body.pipeline_version_id
+    else:
+        with session_scope() as s:
+            pipe = s.query(Pipeline).filter_by(project=body.project, name=body.name).one_or_none()
+            if pipe is None:
+                pipe = Pipeline(project=body.project, name=body.name, created_by=actor)
+                s.add(pipe)
+                s.flush()
+            pid = pipe.id
+        pv = create_version(pid, spec_dict, {}, {}, actor)
+        version_id = pv.id
+    update_step_reached(version_id, "review")
+    try:
+        activate_version(version_id, actor)
+    except PermissionError:
+        pass  # stays draft if actor lacks reviewer role
     if _is_htmx(request):
         return Response(headers={"HX-Redirect": f"/projects/{_urlquote(body.project, safe='')}"})
-    return {"pipeline_version_id": pv.id}
+    return {"pipeline_version_id": version_id}
 
 
 class SaveDraftBody(BaseModel):

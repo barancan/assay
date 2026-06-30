@@ -15,10 +15,11 @@
   requirements: {{ (resume_data.requirements if resume_data else '') | tojson }},
   project: {{ (resume_data.project if resume_data else project_default) | tojson }},
   name: {{ (resume_data.name if resume_data else '') | tojson }},
-  adapter: 'mock',
-  model: '',
-  endpoint: '',
-  key_env: '',
+  adapter: {{ (resume_data.adapter if resume_data else 'mock') | tojson }},
+  model: {{ (resume_data.model if resume_data else '') | tojson }},
+  endpoint: {{ (resume_data.endpoint if resume_data else '') | tojson }},
+  key_env: {{ (resume_data.key_env if resume_data else '') | tojson }},
+  resumeVersionId: {{ (resume_data.version_id if resume_data else none) | tojson }},
   judgeAdapter: {{ judge_adapter | tojson }},
   judgeModel: {{ judge_model | tojson }},
   preview: null,
@@ -41,14 +42,16 @@
     this.preview = await r.json();
   },
   async generate() {
+    const payload = {
+      project: this.project, name: this.name, requirements: this.requirements,
+      adapter_spec: {adapter: this.adapter, model: this.model || null,
+                     endpoint: this.endpoint || null, key_env: this.key_env || null}
+    };
+    if (this.resumeVersionId) payload.pipeline_version_id = this.resumeVersionId;
     const r = await fetch('/pipelines/generate', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        project: this.project, name: this.name, requirements: this.requirements,
-        adapter_spec: {adapter: this.adapter, model: this.model || null,
-                       endpoint: this.endpoint || null, key_env: this.key_env || null}
-      })
+      body: JSON.stringify(payload)
     });
     const d = await r.json();
     if (d.pipeline_version_id) {
