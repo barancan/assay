@@ -77,7 +77,7 @@
     {% if pipe.drafts %}
       {% set edit_href = "/pipelines/new?resume=" ~ pipe.drafts[0].id %}
     {% elif pipe.active_version_id %}
-      {% set edit_href = "/pipelines/" ~ pipe.id ~ "/versions/" ~ pipe.active_version_id ~ "/review" %}
+      {% set edit_href = "/pipelines/new?resume=" ~ pipe.active_version_id %}
     {% else %}
       {% set edit_href = "/pipelines/new?project=" ~ (project_name | urlencode) %}
     {% endif %}

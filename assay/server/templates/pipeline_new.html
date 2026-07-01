@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% from "_macros.html" import model_selector %}
-{% block title %}New pipeline — Assay{% endblock %}
+{% block title %}{% if resume_data %}Edit pipeline{% else %}New pipeline{% endif %} — Assay{% endblock %}
 
 {% block content %}
 <div class="page-header">
-  <a href="/projects" class="btn btn-ghost" style="padding:.3rem .5rem;font-size:13px">
-    <i class="ti ti-arrow-left" aria-hidden="true"></i> Projects
+  <a href="{% if resume_data and resume_data.project %}/projects/{{ resume_data.project | urlencode }}{% else %}/projects{% endif %}" class="btn btn-ghost" style="padding:.3rem .5rem;font-size:13px">
+    <i class="ti ti-arrow-left" aria-hidden="true"></i> {% if resume_data and resume_data.project %}{{ resume_data.project }}{% else %}Projects{% endif %}
   </a>
-  <h1 style="margin:0">New pipeline</h1>
+  <h1 style="margin:0">{% if resume_data %}Edit pipeline{% else %}New pipeline{% endif %}</h1>
 </div>
 
 <div x-data="{
@@ -22,6 +22,7 @@
   endpoint: {{ (resume_data.endpoint if resume_data else '') | tojson }},
   key_env: {{ (resume_data.key_env if resume_data else '') | tojson }},
   resumeVersionId: {{ (resume_data.version_id if resume_data else none) | tojson }},
+  resumePipelineId: {{ (resume_data.pipeline_id if resume_data else none) | tojson }},
   judgeAdapter: {{ judge_adapter | tojson }},
   judgeModel: {{ judge_model | tojson }},
   preview: null,
@@ -51,6 +52,7 @@
                      endpoint: this.endpoint || null, key_env: this.key_env || null}
     };
     if (this.resumeVersionId) payload.pipeline_version_id = this.resumeVersionId;
+    if (this.resumePipelineId) payload.pipeline_id = this.resumePipelineId;
     const r = await fetch('/pipelines/generate', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -125,18 +127,20 @@
                 hx-delete="/pipelines/{{ resume_data.pipeline_id }}"
                 hx-confirm="Delete pipeline '{{ resume_data.name }}'? This removes all versions and cannot be undone."
                 hx-on:htmx:after-request="if(event.detail.successful) window.location='/projects/{{ resume_data.project | urlencode }}'">
-          <i class="ti ti-trash" aria-hidden="true"></i> Delete pipeline
+          <i class="ti ti-trash" aria-hidden="true"></i> Delete
         </button>
         {% endif %}
         <div style="margin-left:auto;display:flex;gap:.5rem">
+          {% if not resume_data %}
           <button type="button" class="btn btn-ghost"
                   @click="saveDraft('define')">
             <i class="ti ti-device-floppy" aria-hidden="true"></i> Save draft
           </button>
+          {% endif %}
           <button type="button" class="btn btn-primary"
                   :disabled="!requirements.trim() || !project.trim() || !name.trim()"
                   @click="loadPreview(); step = 2">
-            Continue <i class="ti ti-arrow-right" aria-hidden="true"></i>
+            Next <i class="ti ti-arrow-right" aria-hidden="true"></i>
           </button>
         </div>
       </div>
@@ -217,19 +221,21 @@
               hx-delete="/pipelines/{{ resume_data.pipeline_id }}"
               hx-confirm="Delete pipeline '{{ resume_data.name }}'? This removes all versions and cannot be undone."
               hx-on:htmx:after-request="if(event.detail.successful) window.location='/projects/{{ resume_data.project | urlencode }}'">
-        <i class="ti ti-trash" aria-hidden="true"></i> Delete pipeline
+        <i class="ti ti-trash" aria-hidden="true"></i> Delete
       </button>
       {% endif %}
       <div style="margin-left:auto;display:flex;gap:.5rem">
         <button type="button" class="btn btn-ghost" @click="step = 1">
           <i class="ti ti-arrow-left" aria-hidden="true"></i> Back
         </button>
+        {% if not resume_data %}
         <button type="button" class="btn btn-ghost" @click="saveDraft('connect')">
           <i class="ti ti-device-floppy" aria-hidden="true"></i> Save draft
         </button>
+        {% endif %}
         <button type="button" class="btn btn-primary" @click="generate()" :disabled="generating">
           <i class="ti" :class="generating ? 'ti-loader-2' : 'ti-arrow-right'" aria-hidden="true"></i>
-          <span x-text="generating ? 'Generating…' : 'Review'"></span>
+          <span x-text="generating ? 'Saving…' : '{% if resume_data %}Save{% else %}Review{% endif %}'"></span>
         </button>
       </div>
     </div>

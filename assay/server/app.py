@@ -262,13 +262,13 @@ def pipeline_new_page(request: Request, resume: int | None = None, project: str 
         resume_data = None
         if resume:
             pv = s.get(PipelineVersion, resume)
-            if pv and pv.status == "draft":
+            if pv and pv.status in ("draft", "active"):
                 from ..store.models import Pipeline as _P
                 pipe = s.get(_P, pv.pipeline_id)
                 cfg = pv.config if isinstance(pv.config, dict) else {}
                 target = cfg.get("target", {}) or {}
                 resume_data = {
-                    "version_id": pv.id,
+                    "version_id": pv.id if pv.status == "draft" else None,
                     "pipeline_id": pipe.id if pipe else None,
                     "requirements": cfg.get("requirements", ""),
                     "step_reached": pv.step_reached or "define",
@@ -346,6 +346,7 @@ class GenerateBody(BaseModel):
     adapter_spec: dict
     judge_spec: dict | None = None
     pipeline_version_id: int | None = None
+    pipeline_id: int | None = None
 
 
 @app.post("/pipelines/generate")
@@ -367,11 +368,18 @@ def pipeline_generate(
         version_id = body.pipeline_version_id
     else:
         with session_scope() as s:
-            pipe = s.query(Pipeline).filter_by(project=body.project, name=body.name).one_or_none()
-            if pipe is None:
-                pipe = Pipeline(project=body.project, name=body.name, created_by=actor)
-                s.add(pipe)
-                s.flush()
+            if body.pipeline_id:
+                pipe = s.get(Pipeline, body.pipeline_id)
+                if pipe is None:
+                    raise HTTPException(404, "pipeline not found")
+                pipe.name = body.name
+                pipe.project = body.project
+            else:
+                pipe = s.query(Pipeline).filter_by(project=body.project, name=body.name).one_or_none()
+                if pipe is None:
+                    pipe = Pipeline(project=body.project, name=body.name, created_by=actor)
+                    s.add(pipe)
+            s.flush()
             pid = pipe.id
         pv = create_version(pid, spec_dict, {}, {}, actor)
         version_id = pv.id
@@ -650,7 +658,7 @@ def delete_pipeline(pipeline_id: int, request: Request):
             raise HTTPException(404, "pipeline not found")
         version_ids = [pv.id for pv in pipe.versions]
         if version_ids:
-            has_runs = s.query(_Run).filter(_Run.pipeline_version_id.in_(version_ids)).first()
+            has_runs = s.query(Run).filter(Run.pipeline_version_id.in_(version_ids)).first()
             if has_runs:
                 raise HTTPException(
                     409,
