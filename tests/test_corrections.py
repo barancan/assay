@@ -147,15 +147,14 @@ def test_project_detail_draft_has_resume_link(client):
     assert f"resume={pv.id}" in resp.text
 
 
-def test_nav_omits_pipelines_link(client):
-    """Navigation no longer has a Pipelines top-level link."""
+def test_nav_has_pipelines_link(client):
+    """Navigation has a Pipelines top-level link."""
     resp = client.get("/")
-    # Extract just the nav block to avoid false matches in page body
     html = resp.text
     nav_start = html.find('<nav')
     nav_end = html.find('</nav>', nav_start)
     nav_html = html[nav_start:nav_end]
-    assert 'href="/pipelines"' not in nav_html
+    assert 'href="/pipelines"' in nav_html
 
 
 # ── 4. Model selectors ────────────────────────────────────────────────────

@@ -9,8 +9,9 @@
   </a>
 </div>
 
-{% if drafts %}
-<div class="card" style="padding:0;overflow-x:auto">
+{% if pipelines %}
+<div class="card" style="padding:0;overflow:hidden">
+  <div style="overflow-x:auto">
   <table>
     <thead>
       <tr>
@@ -22,25 +23,35 @@
       </tr>
     </thead>
     <tbody>
-    {% for d in drafts %}
+    {% for d in pipelines %}
       <tr id="pipeline-version-row-{{ d.id }}">
         <td>
           <strong style="font-size:14px">{{ d.pipeline_name }}</strong>
-          <div style="font-size:12px;color:var(--text-muted)">v{{ d.version_number }} · draft</div>
+          <div style="font-size:12px;color:var(--text-muted)">v{{ d.version_number }} · {{ d.status }}</div>
         </td>
         <td style="font-size:13px;color:var(--text-secondary)">{{ d.project }}</td>
         <td>
-          {% set step = d.step_reached or 'define' %}
-          {% if step == 'review' %}
-            <span class="badge badge-accent">Review</span>
-          {% elif step == 'connect' %}
-            <span class="badge badge-warning">Connect</span>
+          {% if d.status == 'active' %}
+            <span class="badge badge-pass">Active</span>
           {% else %}
-            <span class="badge badge-pending">Define</span>
+            {% set step = d.step_reached or 'define' %}
+            {% if step == 'review' %}
+              <span class="badge badge-accent">Review</span>
+            {% elif step == 'connect' %}
+              <span class="badge badge-warning">Connect</span>
+            {% else %}
+              <span class="badge badge-pending">Define</span>
+            {% endif %}
           {% endif %}
         </td>
         <td class="meta-date">{{ d.created_at }}</td>
         <td style="white-space:nowrap;display:flex;gap:.25rem;align-items:center">
+          {% if d.status == 'active' %}
+          <a href="/pipelines/{{ d.pipeline_id }}/versions/{{ d.id }}/review" class="btn btn-ghost"
+             style="font-size:13px;padding:.25rem .5rem">
+            <i class="ti ti-eye" aria-hidden="true"></i> Review
+          </a>
+          {% else %}
           <a href="/pipelines/new?resume={{ d.id }}" class="btn btn-ghost"
              style="font-size:13px;padding:.25rem .5rem">
             <i class="ti ti-player-play" aria-hidden="true"></i> Resume
@@ -53,16 +64,18 @@
                   hx-confirm="Delete this draft pipeline?">
             <i class="ti ti-trash" aria-hidden="true"></i>
           </button>
+          {% endif %}
         </td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 {% else %}
 <div class="card" style="text-align:center;padding:3rem 1.5rem">
   <i class="ti ti-git-branch" style="font-size:2.5rem;color:var(--text-muted);display:block;margin-bottom:.75rem" aria-hidden="true"></i>
-  <p style="color:var(--text-secondary);margin:0 0 .5rem;font-size:15px;font-weight:500">No draft pipelines</p>
+  <p style="color:var(--text-secondary);margin:0 0 .5rem;font-size:15px;font-weight:500">No pipelines yet</p>
   <p style="color:var(--text-muted);font-size:13px;margin:0">Create a new pipeline to get started.</p>
   <a href="/pipelines/new" class="btn btn-primary" style="margin-top:1rem">
     <i class="ti ti-plus" aria-hidden="true"></i> New pipeline

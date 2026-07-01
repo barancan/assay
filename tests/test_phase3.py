@@ -96,8 +96,8 @@ def test_judge_section_shown(client):
 
 # ── POST /pipelines/generate ─────────────────────────────────────────────────
 
-def test_pipeline_generate_creates_draft(client):
-    """POST /pipelines/generate with mock adapter creates a PipelineVersion(status=draft, step=review)."""
+def test_pipeline_generate_creates_active(client):
+    """POST /pipelines/generate auto-activates the version so it is immediately runnable."""
     resp = client.post(
         "/pipelines/generate",
         json={
@@ -117,7 +117,7 @@ def test_pipeline_generate_creates_draft(client):
     with session_scope() as s:
         pv = s.get(PipelineVersion, data["pipeline_version_id"])
         assert pv is not None
-        assert pv.status == "draft"
+        assert pv.status == "active"
         assert pv.step_reached == "review"
 
 
