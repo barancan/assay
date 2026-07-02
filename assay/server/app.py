@@ -681,10 +681,7 @@ def delete_pipeline(pipeline_id: int, request: Request):
                 )
         for pv in list(pipe.versions):
             s.delete(pv)
-        project = pipe.project
         s.delete(pipe)
-    if _is_htmx(request):
-        return Response(headers={"HX-Redirect": f"/projects/{_urlquote(project, safe='')}"})
     return {"ok": True}
 
 

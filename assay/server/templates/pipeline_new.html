@@ -190,7 +190,7 @@
                 style="color:var(--text-danger)"
                 hx-delete="/pipelines/{{ resume_data.pipeline_id }}"
                 hx-confirm="Delete pipeline '{{ resume_data.name }}'? This removes all versions and cannot be undone."
-                hx-on:htmx:after-request="if(event.detail.successful){ const p=document.referrer; window.location=(p&&new URL(p).origin===location.origin)?p:'/pipelines'; }">
+                hx-on:htmx:after-request="if(event.detail.successful) window.location='/pipelines'">
           <i class="ti ti-trash" aria-hidden="true"></i> Delete
         </button>
         {% endif %}
@@ -284,7 +284,7 @@
               style="color:var(--text-danger)"
               hx-delete="/pipelines/{{ resume_data.pipeline_id }}"
               hx-confirm="Delete pipeline '{{ resume_data.name }}'? This removes all versions and cannot be undone."
-              hx-on:htmx:after-request="if(event.detail.successful){ const p=document.referrer; window.location=(p&&new URL(p).origin===location.origin)?p:'/pipelines'; }">
+              hx-on:htmx:after-request="if(event.detail.successful) window.location='/pipelines'">
         <i class="ti ti-trash" aria-hidden="true"></i> Delete
       </button>
       {% endif %}
