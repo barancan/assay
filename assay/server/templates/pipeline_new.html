@@ -26,6 +26,9 @@
   judgeAdapter: {{ judge_adapter | tojson }},
   judgeModel: {{ judge_model | tojson }},
   preview: null,
+  generatedChecks: [],
+  permissionError: null,
+  draftSaved: false,
   hasJudge() {
     return this.preview ? this.preview.checks.some(c => c.type === 'judge') : false;
   },
@@ -62,8 +65,27 @@
     this.generating = false;
     if (d.pipeline_version_id) {
       this.generatedVersionId = d.pipeline_version_id;
+      if (d.pipeline_id) this.resumePipelineId = d.pipeline_id;
+      this.permissionError = d.permission_error || null;
+      try {
+        const cr = await fetch('/pipelines/versions/' + d.pipeline_version_id + '/checks');
+        this.generatedChecks = await cr.json();
+      } catch (e) {
+        this.generatedChecks = [];
+      }
       this.step = 3;
+      localStorage.removeItem('assay_wizard_new');
+      setTimeout(() => { window.location.href = '/pipelines'; }, 2500);
     }
+  },
+  async saveCheckParams(chk, params) {
+    await fetch('/pipelines/versions/' + this.generatedVersionId + '/check-params', {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({suite_id: chk.suite_id, case_id: chk.case_id,
+                            check_index: chk.check_index, params})
+    });
+    chk.params = params;
   },
   async saveDraft(s) {
     if (!this.requirements || !this.project || !this.name) return;
@@ -73,8 +95,50 @@
       body: JSON.stringify({project: this.project, name: this.name,
                             requirements: this.requirements, step: s})
     });
+    localStorage.removeItem('assay_wizard_new');
+    this.draftSaved = true;
+    setTimeout(() => { window.location.href = '/pipelines'; }, 1500);
+  },
+  _persist() {
+    try {
+      localStorage.setItem('assay_wizard_new', JSON.stringify({
+        requirements: this.requirements, project: this.project, name: this.name,
+        adapter: this.adapter, model: this.model,
+        endpoint: this.endpoint, key_env: this.key_env,
+      }));
+    } catch(e) {}
+  },
+  init() {
+    if (this.resumeVersionId) return;
+    try {
+      const d = JSON.parse(localStorage.getItem('assay_wizard_new') || 'null');
+      if (d) {
+        if (d.requirements !== undefined) this.requirements = d.requirements;
+        if (d.project !== undefined) this.project = d.project;
+        if (d.name !== undefined) this.name = d.name;
+        if (d.adapter !== undefined) this.adapter = d.adapter;
+        if (d.model !== undefined) this.model = d.model;
+        if (d.endpoint !== undefined) this.endpoint = d.endpoint;
+        if (d.key_env !== undefined) this.key_env = d.key_env;
+      }
+    } catch(e) {}
+    ['requirements','project','name','adapter','model','endpoint','key_env'].forEach(k => {
+      this.$watch(k, () => this._persist());
+    });
   }
 }">
+
+  <!-- Draft saved toast -->
+  <div x-show="draftSaved" x-cloak
+       style="position:fixed;top:1.25rem;right:1.25rem;z-index:999;
+              display:flex;align-items:center;gap:.5rem;
+              background:var(--bg-success);color:var(--text-success);
+              border:1px solid var(--border-success);border-radius:var(--radius);
+              padding:.6rem 1rem;font-size:14px;font-weight:500;
+              box-shadow:0 4px 12px rgba(0,0,0,.1)">
+    <i class="ti ti-circle-check" aria-hidden="true"></i>
+    Draft saved — taking you to Pipelines…
+  </div>
 
   <!-- Step tabs -->
   <div style="display:flex;align-items:center;margin-bottom:1.25rem;gap:.25rem">
@@ -126,7 +190,7 @@
                 style="color:var(--text-danger)"
                 hx-delete="/pipelines/{{ resume_data.pipeline_id }}"
                 hx-confirm="Delete pipeline '{{ resume_data.name }}'? This removes all versions and cannot be undone."
-                hx-on:htmx:after-request="if(event.detail.successful) window.location='/projects/{{ resume_data.project | urlencode }}'">
+                hx-on:htmx:after-request="if(event.detail.successful) window.location='/pipelines'">
           <i class="ti ti-trash" aria-hidden="true"></i> Delete
         </button>
         {% endif %}
@@ -220,7 +284,7 @@
               style="color:var(--text-danger)"
               hx-delete="/pipelines/{{ resume_data.pipeline_id }}"
               hx-confirm="Delete pipeline '{{ resume_data.name }}'? This removes all versions and cannot be undone."
-              hx-on:htmx:after-request="if(event.detail.successful) window.location='/projects/{{ resume_data.project | urlencode }}'">
+              hx-on:htmx:after-request="if(event.detail.successful) window.location='/pipelines'">
         <i class="ti ti-trash" aria-hidden="true"></i> Delete
       </button>
       {% endif %}
@@ -243,16 +307,37 @@
 
   <!-- Step 3: Review -->
   <div x-show="step === 3">
-    <!-- Success header -->
-    <div class="card" style="border:1px solid var(--border-success,var(--border));margin-bottom:.75rem">
+    <!-- Success header (activated) -->
+    <div class="card" style="border:1px solid var(--border-success,var(--border));margin-bottom:.75rem"
+         x-show="!permissionError">
       <div style="display:flex;align-items:center;gap:.6rem">
         <i class="ti ti-circle-check" style="font-size:1.4rem;color:var(--text-success)" aria-hidden="true"></i>
-        <div>
-          <p style="margin:0;font-weight:500;font-size:15px">Pipeline ready</p>
+        <div style="flex:1">
+          <p style="margin:0;font-weight:500;font-size:15px">Draft saved</p>
           <p style="margin:0;font-size:13px;color:var(--text-muted)">
-            Generated and activated — you can run it now.
+            Generated and activated — taking you to Pipelines…
           </p>
         </div>
+        <a href="/pipelines" class="btn btn-primary" style="flex-shrink:0;font-size:13px">
+          <i class="ti ti-arrow-right" aria-hidden="true"></i> Go now
+        </a>
+      </div>
+    </div>
+
+    <!-- Draft header (activation blocked in enforced mode) -->
+    <div class="card" style="border:1px solid var(--border-warning);background:var(--bg-warning);margin-bottom:.75rem"
+         x-show="permissionError">
+      <div style="display:flex;align-items:center;gap:.6rem">
+        <i class="ti ti-shield-lock" style="font-size:1.4rem;color:var(--text-warning)" aria-hidden="true"></i>
+        <div style="flex:1">
+          <p style="margin:0;font-weight:500;font-size:15px">Draft saved — reviewer activation required</p>
+          <p style="margin:0;font-size:13px;color:var(--text-muted)">
+            You don't have reviewer authority to activate. Taking you to Pipelines…
+          </p>
+        </div>
+        <a href="/pipelines" class="btn" style="flex-shrink:0;font-size:13px;border-color:var(--border-warning)">
+          <i class="ti ti-arrow-right" aria-hidden="true"></i> Go now
+        </a>
       </div>
     </div>
 
@@ -274,35 +359,56 @@
       </div>
     </div>
 
-    <!-- Checks summary -->
-    <div class="card" style="margin-bottom:.75rem" x-show="preview && preview.checks && preview.checks.length">
+    <!-- Checks summary + per-check configuration -->
+    <div class="card" style="margin-bottom:.75rem"
+         x-show="generatedChecks.length || (preview && preview.checks && preview.checks.length)">
       <h2 style="margin:0 0 .75rem;font-size:15px">
         Checks
         <span style="font-weight:400;color:var(--text-muted);font-size:13px"
-              x-text="'(' + (preview ? preview.checks.length : 0) + ' total)'"></span>
+              x-text="'(' + (generatedChecks.length || (preview ? preview.checks.length : 0)) + ' total)'"></span>
       </h2>
-      <template x-for="chk in (preview ? preview.checks : [])" :key="chk.id || chk.assertion">
-        <div style="display:flex;gap:.5rem;align-items:baseline;padding:.3rem 0;
-                    border-bottom:1px solid var(--border);font-size:13px">
-          <span class="badge"
-                :class="chk.type === 'template' ? 'badge-neutral' : chk.type === 'judge' ? 'badge-accent' : 'badge-warning'"
-                style="flex-shrink:0;font-size:11px"
-                x-text="chk.type"></span>
-          <span style="color:var(--text-primary)" x-text="chk.assertion || chk.id"></span>
+      <!-- Persisted check list (read-only) -->
+      <template x-if="generatedChecks.length">
+        <div>
+          <template x-for="chk in generatedChecks" :key="chk.suite_id + '/' + chk.case_id + '/' + chk.check_index">
+            <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;
+                        padding:.4rem 0;border-bottom:1px solid var(--border);font-size:13px">
+              <span class="badge"
+                    :class="chk.type === 'template' ? 'badge-template' : chk.type === 'judge' ? 'badge-judge' : 'badge-generated'"
+                    style="flex-shrink:0;font-size:11px" x-text="chk.type"></span>
+              <span class="badge"
+                    :class="chk.determinism === 'stochastic' ? 'badge-pro' : 'badge-accent'"
+                    style="flex-shrink:0;font-size:11px"
+                    x-text="chk.determinism === 'stochastic' ? 'Stochastic' : 'Deterministic'"></span>
+              <span style="color:var(--text-primary)" x-text="chk.assertion || chk.case_id"></span>
+            </div>
+          </template>
         </div>
+      </template>
+      <!-- Fallback preview list (generation fetch failed) -->
+      <template x-if="!generatedChecks.length">
+        <template x-for="chk in (preview ? preview.checks : [])" :key="chk.id || chk.assertion">
+          <div style="display:flex;gap:.5rem;align-items:center;padding:.3rem 0;
+                      border-bottom:1px solid var(--border);font-size:13px">
+            <span class="badge"
+                  :class="chk.type === 'template' ? 'badge-template' : chk.type === 'judge' ? 'badge-judge' : 'badge-generated'"
+                  style="flex-shrink:0;font-size:11px"
+                  x-text="chk.type"></span>
+            <span class="badge"
+                  :class="chk.type === 'judge' ? 'badge-pro' : 'badge-accent'"
+                  style="flex-shrink:0;font-size:11px"
+                  x-text="chk.type === 'judge' ? 'Stochastic' : 'Deterministic'"></span>
+            <span style="color:var(--text-primary)" x-text="chk.assertion || chk.id"></span>
+          </div>
+        </template>
       </template>
     </div>
 
-    <!-- Actions -->
-    <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.25rem">
-      <button type="button" class="btn btn-ghost" @click="step = 2">
-        <i class="ti ti-arrow-left" aria-hidden="true"></i> Back
-      </button>
-      <button type="button" class="btn btn-primary"
-              @click="window.location.href = '/projects/' + encodeURIComponent(project)">
-        <i class="ti ti-target" aria-hidden="true"></i> Go to project
-      </button>
-    </div>
+    <!-- Redirect notice -->
+    <p style="font-size:12px;color:var(--text-muted);text-align:right;margin:.25rem 0 0">
+      <i class="ti ti-loader-2" aria-hidden="true"></i>
+      Redirecting… or <a href="/pipelines">go now</a>
+    </p>
   </div>
 
 </div>

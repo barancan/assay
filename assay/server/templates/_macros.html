@@ -45,6 +45,21 @@
 {% endmacro %}
 
 {#
+  determinism_badge(type)
+  ───────────────────────
+  Derived classification (no stored column):
+    judge                → stochastic (model-graded, scored)
+    template | generated → deterministic (coded, reproducible, binary)
+#}
+{% macro determinism_badge(type) %}
+{% if type == 'judge' %}
+<span class="badge badge-pro"><i class="ti ti-dice-3" aria-hidden="true"></i> Stochastic</span>
+{% else %}
+<span class="badge badge-accent"><i class="ti ti-binary" aria-hidden="true"></i> Deterministic</span>
+{% endif %}
+{% endmacro %}
+
+{#
   model_selector(model_var, provider_var)
   ────────────────────────────────────────
   Renders a <select> of known models for the current provider plus a

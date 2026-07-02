@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import state_badge, check_type_badge %}
+{% from "_macros.html" import state_badge, check_type_badge, determinism_badge %}
 {% block title %}Review v{{ version_number }} — {{ pipeline_name }} — Assay{% endblock %}
 
 {% block content %}
@@ -19,7 +19,7 @@
   <button class="btn btn-ghost" style="color:var(--text-danger);margin-left:auto"
           hx-delete="/pipelines/{{ pipeline_id }}"
           hx-confirm="Delete pipeline '{{ pipeline_name }}'? This removes all versions and cannot be undone."
-          hx-on:htmx:after-request="if(event.detail.successful) window.location='/projects/{{ project_name | urlencode }}'">
+          hx-on:htmx:after-request="if(event.detail.successful) window.location='/pipelines'">
     <i class="ti ti-trash" aria-hidden="true"></i> Delete pipeline
   </button>
 </div>
@@ -70,17 +70,30 @@
     <div style="display:flex;height:100%">
       <div style="width:{{ pct_t }}%;background:var(--text-muted)"></div>
       <div style="width:{{ pct_g }}%;background:var(--text-warning)"></div>
-      <div style="width:{{ pct_j }}%;background:var(--text-accent)"></div>
+      <div style="width:{{ pct_j }}%;background:var(--text-pro)"></div>
     </div>
   </div>
   {% endif %}
 </div>
 
-<!-- Check list -->
+<!-- Check list (with determinism grouping filter) -->
+{% if check_count > 0 %}
+<div x-data="{ filter: 'all' }">
+<div style="display:flex;gap:.4rem;margin-bottom:.75rem;flex-wrap:wrap">
+  {% for f in [('all', 'All'), ('deterministic', 'Deterministic'), ('stochastic', 'Stochastic')] %}
+  <button type="button" class="badge"
+          :class="filter === '{{ f[0] }}' ? 'badge-accent' : 'badge-neutral'"
+          style="cursor:pointer;border:1px solid var(--border);font-size:13px"
+          @click="filter = '{{ f[0] }}'">{{ f[1] }}</button>
+  {% endfor %}
+</div>
+{% endif %}
 {% for chk in checks %}
-<div class="card" id="check-row-{{ loop.index0 }}" style="padding:.85rem 1rem">
+<div class="card" id="check-row-{{ loop.index0 }}" style="padding:.85rem 1rem"
+     x-show="filter === 'all' || filter === '{{ chk.determinism }}'">
   <div style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin-bottom:.5rem">
     {{ check_type_badge(chk.type) }}
+    {{ determinism_badge(chk.type) }}
     <span style="font-size:13px;color:var(--text-muted)">
       {{ chk.suite_id }}<span style="margin:0 .2rem;opacity:.5">/</span>{{ chk.case_id }}
     </span>
@@ -184,6 +197,7 @@
   </p>
 </div>
 {% endfor %}
+{% if check_count > 0 %}</div>{% endif %}
 
 <!-- Activation gate -->
 {% if version_status == 'draft' %}

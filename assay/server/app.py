@@ -384,13 +384,27 @@ def pipeline_generate(
         pv = create_version(pid, spec_dict, {}, {}, actor)
         version_id = pv.id
     update_step_reached(version_id, "review")
+    activated = True
+    permission_error = None
     try:
         activate_version(version_id, actor)
-    except PermissionError:
-        pass  # stays draft if actor lacks reviewer role
+    except PermissionError as e:
+        # In enforced mode a non-reviewer cannot save-and-activate. Surface it
+        # instead of silently swallowing — the version stays a draft awaiting
+        # reviewer activation.
+        activated = False
+        permission_error = str(e)
     if _is_htmx(request):
         return Response(headers={"HX-Redirect": f"/projects/{_urlquote(body.project, safe='')}"})
-    return {"pipeline_version_id": version_id}
+    with session_scope() as s:
+        pv = s.get(PipelineVersion, version_id)
+        resolved_pipeline_id = pv.pipeline_id if pv else None
+    return {
+        "pipeline_version_id": version_id,
+        "pipeline_id": resolved_pipeline_id,
+        "activated": activated,
+        "permission_error": permission_error,
+    }
 
 
 class SaveDraftBody(BaseModel):
@@ -667,10 +681,7 @@ def delete_pipeline(pipeline_id: int, request: Request):
                 )
         for pv in list(pipe.versions):
             s.delete(pv)
-        project = pipe.project
         s.delete(pipe)
-    if _is_htmx(request):
-        return Response(headers={"HX-Redirect": f"/projects/{_urlquote(project, safe='')}"})
     return {"ok": True}
 
 
@@ -756,7 +767,7 @@ def _build_check_list(pv) -> list[dict]:
     checks = []
     for suite in (pv.config or {}).get("suites", []):
         for case in suite.get("cases", []):
-            for chk in case.get("checks", []):
+            for idx, chk in enumerate(case.get("checks", [])):
                 ctype = chk.get("type", "template")
                 key = None
                 source = None
@@ -770,7 +781,9 @@ def _build_check_list(pv) -> list[dict]:
                 checks.append({
                     "suite_id": suite.get("id", ""),
                     "case_id": case.get("id", ""),
+                    "check_index": idx,
                     "type": ctype,
+                    "determinism": "stochastic" if ctype == "judge" else "deterministic",
                     "key": key,
                     "uses": chk.get("uses"),
                     "rubric": chk.get("rubric"),
@@ -814,6 +827,46 @@ def pipeline_review_page(request: Request, pipeline_id: int, version_id: int):
             "identity": _identity(request),
         }
     return templates.TemplateResponse(request, "pipeline_review.html", ctx)
+
+
+@app.get("/pipelines/versions/{version_id}/checks")
+def get_version_checks(version_id: int):
+    """Return the flattened check list (with determinism) for a version as JSON."""
+    with session_scope() as s:
+        pv = s.get(PipelineVersion, version_id)
+        if not pv:
+            raise HTTPException(404, "version not found")
+        return _build_check_list(pv)
+
+
+class CheckParamsBody(BaseModel):
+    suite_id: str
+    case_id: str
+    check_index: int
+    params: dict
+
+
+@app.patch("/pipelines/versions/{version_id}/check-params")
+def patch_check_params(
+    version_id: int,
+    body: CheckParamsBody,
+    request: Request,
+    x_assay_user: str | None = Header(default=None),
+):
+    from ..pipeline.service import update_check_params
+    actor = _require_identity(request, x_assay_user)
+    try:
+        update_check_params(version_id, body.suite_id, body.case_id,
+                            body.check_index, body.params)
+    except ValueError as e:
+        status = 409 if "draft" in str(e) else 404
+        raise HTTPException(status, str(e))
+    if _is_htmx(request):
+        return HTMLResponse(
+            '<span class="badge badge-pass" style="font-size:12px">'
+            '<i class="ti ti-check" aria-hidden="true"></i> Saved</span>',
+        )
+    return {"ok": True, "version_id": version_id}
 
 
 class CheckEditBody(BaseModel):

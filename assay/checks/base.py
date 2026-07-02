@@ -13,12 +13,13 @@ class CheckResult:
     message: str = ""
     evidence: dict[str, Any] = field(default_factory=dict)
     required: bool = True
+    type: str = ""                      # template | generated | judge (for display)
 
     def to_dict(self) -> dict:
         return asdict(self)
 
 
-def from_raw(raw: dict, check_id: str, required: bool) -> CheckResult:
+def from_raw(raw: dict, check_id: str, required: bool, type: str = "") -> CheckResult:
     """Build a CheckResult from the plain dict a generated function returns."""
     return CheckResult(
         check_id=check_id,
@@ -28,4 +29,5 @@ def from_raw(raw: dict, check_id: str, required: bool) -> CheckResult:
         message=raw.get("message", ""),
         evidence=raw.get("evidence", {}) or {},
         required=required,
+        type=type,
     )
