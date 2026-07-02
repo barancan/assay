@@ -73,6 +73,7 @@
         this.generatedChecks = [];
       }
       this.step = 3;
+      localStorage.removeItem('assay_wizard_new');
       setTimeout(() => { window.location.href = '/pipelines'; }, 2500);
     }
   },
@@ -92,6 +93,33 @@
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({project: this.project, name: this.name,
                             requirements: this.requirements, step: s})
+    });
+  },
+  _persist() {
+    try {
+      localStorage.setItem('assay_wizard_new', JSON.stringify({
+        requirements: this.requirements, project: this.project, name: this.name,
+        adapter: this.adapter, model: this.model,
+        endpoint: this.endpoint, key_env: this.key_env,
+      }));
+    } catch(e) {}
+  },
+  init() {
+    if (this.resumeVersionId) return;
+    try {
+      const d = JSON.parse(localStorage.getItem('assay_wizard_new') || 'null');
+      if (d) {
+        if (d.requirements !== undefined) this.requirements = d.requirements;
+        if (d.project !== undefined) this.project = d.project;
+        if (d.name !== undefined) this.name = d.name;
+        if (d.adapter !== undefined) this.adapter = d.adapter;
+        if (d.model !== undefined) this.model = d.model;
+        if (d.endpoint !== undefined) this.endpoint = d.endpoint;
+        if (d.key_env !== undefined) this.key_env = d.key_env;
+      }
+    } catch(e) {}
+    ['requirements','project','name','adapter','model','endpoint','key_env'].forEach(k => {
+      this.$watch(k, () => this._persist());
     });
   }
 }">
