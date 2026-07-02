@@ -73,6 +73,7 @@
         this.generatedChecks = [];
       }
       this.step = 3;
+      setTimeout(() => { window.location.href = '/pipelines'; }, 2500);
     }
   },
   async saveCheckParams(chk, params) {
@@ -267,12 +268,15 @@
          x-show="!permissionError">
       <div style="display:flex;align-items:center;gap:.6rem">
         <i class="ti ti-circle-check" style="font-size:1.4rem;color:var(--text-success)" aria-hidden="true"></i>
-        <div>
-          <p style="margin:0;font-weight:500;font-size:15px">Pipeline ready</p>
+        <div style="flex:1">
+          <p style="margin:0;font-weight:500;font-size:15px">Draft saved</p>
           <p style="margin:0;font-size:13px;color:var(--text-muted)">
-            Generated and activated — you can run it now.
+            Generated and activated — taking you to Pipelines…
           </p>
         </div>
+        <a href="/pipelines" class="btn btn-primary" style="flex-shrink:0;font-size:13px">
+          <i class="ti ti-arrow-right" aria-hidden="true"></i> Go now
+        </a>
       </div>
     </div>
 
@@ -281,18 +285,15 @@
          x-show="permissionError">
       <div style="display:flex;align-items:center;gap:.6rem">
         <i class="ti ti-shield-lock" style="font-size:1.4rem;color:var(--text-warning)" aria-hidden="true"></i>
-        <div>
-          <p style="margin:0;font-weight:500;font-size:15px">Saved as draft — reviewer activation required</p>
+        <div style="flex:1">
+          <p style="margin:0;font-weight:500;font-size:15px">Draft saved — reviewer activation required</p>
           <p style="margin:0;font-size:13px;color:var(--text-muted)">
-            You don't have reviewer authority to activate. A reviewer must open the
-            version and activate it before it can run.
+            You don't have reviewer authority to activate. Taking you to Pipelines…
           </p>
-          <a class="btn btn-ghost" style="font-size:12px;margin-top:.4rem;padding:.2rem .5rem"
-             :href="'/pipelines/' + resumePipelineId + '/versions/' + generatedVersionId + '/review'"
-             x-show="resumePipelineId && generatedVersionId">
-            <i class="ti ti-external-link" aria-hidden="true"></i> Open version for review
-          </a>
         </div>
+        <a href="/pipelines" class="btn" style="flex-shrink:0;font-size:13px;border-color:var(--border-warning)">
+          <i class="ti ti-arrow-right" aria-hidden="true"></i> Go now
+        </a>
       </div>
     </div>
 
@@ -322,56 +323,35 @@
         <span style="font-weight:400;color:var(--text-muted);font-size:13px"
               x-text="'(' + (generatedChecks.length || (preview ? preview.checks.length : 0)) + ' total)'"></span>
       </h2>
-      <!-- Configurable list from the persisted version -->
+      <!-- Persisted check list (read-only) -->
       <template x-if="generatedChecks.length">
         <div>
-          <template x-for="(chk, ci) in generatedChecks" :key="chk.suite_id + '/' + chk.case_id + '/' + chk.check_index">
-            <div x-data="{ editing: false, draft: JSON.stringify(chk.params || {}, null, 2), saved: false }"
-                 style="padding:.4rem 0;border-bottom:1px solid var(--border);font-size:13px">
-              <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-                <span class="badge"
-                      :class="chk.type === 'template' ? 'badge-template' : chk.type === 'judge' ? 'badge-judge' : 'badge-generated'"
-                      style="flex-shrink:0;font-size:11px" x-text="chk.type"></span>
-                <span class="badge"
-                      :class="chk.determinism === 'stochastic' ? 'badge-accent' : 'badge-neutral'"
-                      style="flex-shrink:0;font-size:11px"
-                      x-text="chk.determinism === 'stochastic' ? 'Stochastic' : 'Deterministic'"></span>
-                <span style="color:var(--text-primary)" x-text="chk.assertion || chk.case_id"></span>
-                <button type="button" class="btn btn-ghost"
-                        style="margin-left:auto;font-size:11px;padding:.15rem .4rem"
-                        @click="editing = !editing; saved = false"
-                        x-show="chk.type === 'template' || chk.type === 'judge'">
-                  <i class="ti ti-adjustments" aria-hidden="true"></i>
-                  <span x-text="editing ? 'Close' : 'Edit params'"></span>
-                </button>
-              </div>
-              <div x-show="editing" style="margin-top:.4rem">
-                <textarea x-model="draft" rows="4"
-                          style="width:100%;font-family:monospace;font-size:12px;resize:vertical"></textarea>
-                <div style="display:flex;gap:.5rem;align-items:center;margin-top:.35rem">
-                  <button type="button" class="btn btn-primary" style="font-size:11px"
-                          @click="try { await saveCheckParams(chk, JSON.parse(draft)); saved = true; } catch(e) { alert('Invalid JSON'); }">
-                    <i class="ti ti-device-floppy" aria-hidden="true"></i> Save params
-                  </button>
-                  <span x-show="saved" class="badge badge-pass" style="font-size:11px">
-                    <i class="ti ti-check" aria-hidden="true"></i> Saved</span>
-                </div>
-              </div>
+          <template x-for="chk in generatedChecks" :key="chk.suite_id + '/' + chk.case_id + '/' + chk.check_index">
+            <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;
+                        padding:.4rem 0;border-bottom:1px solid var(--border);font-size:13px">
+              <span class="badge"
+                    :class="chk.type === 'template' ? 'badge-template' : chk.type === 'judge' ? 'badge-judge' : 'badge-generated'"
+                    style="flex-shrink:0;font-size:11px" x-text="chk.type"></span>
+              <span class="badge"
+                    :class="chk.determinism === 'stochastic' ? 'badge-pro' : 'badge-accent'"
+                    style="flex-shrink:0;font-size:11px"
+                    x-text="chk.determinism === 'stochastic' ? 'Stochastic' : 'Deterministic'"></span>
+              <span style="color:var(--text-primary)" x-text="chk.assertion || chk.case_id"></span>
             </div>
           </template>
         </div>
       </template>
-      <!-- Fallback preview list (no persisted checks) -->
+      <!-- Fallback preview list (generation fetch failed) -->
       <template x-if="!generatedChecks.length">
         <template x-for="chk in (preview ? preview.checks : [])" :key="chk.id || chk.assertion">
-          <div style="display:flex;gap:.5rem;align-items:baseline;padding:.3rem 0;
+          <div style="display:flex;gap:.5rem;align-items:center;padding:.3rem 0;
                       border-bottom:1px solid var(--border);font-size:13px">
             <span class="badge"
-                  :class="chk.type === 'template' ? 'badge-neutral' : chk.type === 'judge' ? 'badge-accent' : 'badge-warning'"
+                  :class="chk.type === 'template' ? 'badge-template' : chk.type === 'judge' ? 'badge-judge' : 'badge-generated'"
                   style="flex-shrink:0;font-size:11px"
                   x-text="chk.type"></span>
             <span class="badge"
-                  :class="chk.type === 'judge' ? 'badge-accent' : 'badge-neutral'"
+                  :class="chk.type === 'judge' ? 'badge-pro' : 'badge-accent'"
                   style="flex-shrink:0;font-size:11px"
                   x-text="chk.type === 'judge' ? 'Stochastic' : 'Deterministic'"></span>
             <span style="color:var(--text-primary)" x-text="chk.assertion || chk.id"></span>
@@ -380,16 +360,11 @@
       </template>
     </div>
 
-    <!-- Actions -->
-    <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.25rem">
-      <button type="button" class="btn btn-ghost" @click="step = 2">
-        <i class="ti ti-arrow-left" aria-hidden="true"></i> Back
-      </button>
-      <button type="button" class="btn btn-primary"
-              @click="window.location.href = '/projects/' + encodeURIComponent(project)">
-        <i class="ti ti-target" aria-hidden="true"></i> Go to project
-      </button>
-    </div>
+    <!-- Redirect notice -->
+    <p style="font-size:12px;color:var(--text-muted);text-align:right;margin:.25rem 0 0">
+      <i class="ti ti-loader-2" aria-hidden="true"></i>
+      Redirecting… or <a href="/pipelines">go now</a>
+    </p>
   </div>
 
 </div>
