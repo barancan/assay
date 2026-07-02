@@ -30,6 +30,7 @@ class CheckSpec(BaseModel):
     rubric: str | None = None                # path to rubric yaml (for type=judge)
     with_: dict[str, Any] = Field(default_factory=dict, alias="with")
     required: bool = True
+    threshold: float | None = None           # min passing score (0-1) for graded checks
 
     model_config = {"populate_by_name": True}
 
@@ -38,6 +39,7 @@ class Case(BaseModel):
     id: str
     input: dict[str, Any] = Field(default_factory=dict)
     checks: list[CheckSpec] = Field(default_factory=list)
+    context: dict[str, Any] | None = None   # RAG retrieved passages or extra eval context
 
 
 class Suite(BaseModel):
