@@ -1,3 +1,4 @@
+{% from "_macros.html" import determinism_badge %}
 <div style="padding:.75rem;font-size:13px">
   <div style="margin-bottom:.75rem">
     <h4 style="font-size:12px;font-weight:600;letter-spacing:.04em;color:var(--text-muted);text-transform:uppercase;margin:0 0 .35rem">Input</h4>
@@ -18,6 +19,15 @@
       {% endif %}
       <div style="flex:1">
         <strong>{{ chk.get('check_id', chk.get('uses', '?')) }}</strong>
+        {% if chk.get('type') %}{{ determinism_badge(chk['type']) }}{% endif %}
+        {% if chk.get('score') is not none %}
+          <span style="font-size:12px;color:var(--text-muted)">
+            {{ '%.2f' | format(chk['score']) }}
+            {%- if chk.get('threshold') is not none %}
+              {{ '≥' if chk.get('passed') else '<' }} {{ '%.2f' | format(chk['threshold']) }}
+            {%- endif %}
+          </span>
+        {% endif %}
         {% if chk.get('message') %} — {{ chk['message'] }}{% endif %}
         {% if chk.get('evidence') %}
         <details style="margin-top:.25rem">

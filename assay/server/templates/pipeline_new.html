@@ -26,6 +26,8 @@
   judgeAdapter: {{ judge_adapter | tojson }},
   judgeModel: {{ judge_model | tojson }},
   preview: null,
+  generatedChecks: [],
+  permissionError: null,
   hasJudge() {
     return this.preview ? this.preview.checks.some(c => c.type === 'judge') : false;
   },
@@ -62,8 +64,25 @@
     this.generating = false;
     if (d.pipeline_version_id) {
       this.generatedVersionId = d.pipeline_version_id;
+      if (d.pipeline_id) this.resumePipelineId = d.pipeline_id;
+      this.permissionError = d.permission_error || null;
+      try {
+        const cr = await fetch('/pipelines/versions/' + d.pipeline_version_id + '/checks');
+        this.generatedChecks = await cr.json();
+      } catch (e) {
+        this.generatedChecks = [];
+      }
       this.step = 3;
     }
+  },
+  async saveCheckParams(chk, params) {
+    await fetch('/pipelines/versions/' + this.generatedVersionId + '/check-params', {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({suite_id: chk.suite_id, case_id: chk.case_id,
+                            check_index: chk.check_index, params})
+    });
+    chk.params = params;
   },
   async saveDraft(s) {
     if (!this.requirements || !this.project || !this.name) return;
@@ -243,8 +262,9 @@
 
   <!-- Step 3: Review -->
   <div x-show="step === 3">
-    <!-- Success header -->
-    <div class="card" style="border:1px solid var(--border-success,var(--border));margin-bottom:.75rem">
+    <!-- Success header (activated) -->
+    <div class="card" style="border:1px solid var(--border-success,var(--border));margin-bottom:.75rem"
+         x-show="!permissionError">
       <div style="display:flex;align-items:center;gap:.6rem">
         <i class="ti ti-circle-check" style="font-size:1.4rem;color:var(--text-success)" aria-hidden="true"></i>
         <div>
@@ -252,6 +272,26 @@
           <p style="margin:0;font-size:13px;color:var(--text-muted)">
             Generated and activated — you can run it now.
           </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Draft header (activation blocked in enforced mode) -->
+    <div class="card" style="border:1px solid var(--border-warning);background:var(--bg-warning);margin-bottom:.75rem"
+         x-show="permissionError">
+      <div style="display:flex;align-items:center;gap:.6rem">
+        <i class="ti ti-shield-lock" style="font-size:1.4rem;color:var(--text-warning)" aria-hidden="true"></i>
+        <div>
+          <p style="margin:0;font-weight:500;font-size:15px">Saved as draft — reviewer activation required</p>
+          <p style="margin:0;font-size:13px;color:var(--text-muted)">
+            You don't have reviewer authority to activate. A reviewer must open the
+            version and activate it before it can run.
+          </p>
+          <a class="btn btn-ghost" style="font-size:12px;margin-top:.4rem;padding:.2rem .5rem"
+             :href="'/pipelines/' + resumePipelineId + '/versions/' + generatedVersionId + '/review'"
+             x-show="resumePipelineId && generatedVersionId">
+            <i class="ti ti-external-link" aria-hidden="true"></i> Open version for review
+          </a>
         </div>
       </div>
     </div>
@@ -274,22 +314,69 @@
       </div>
     </div>
 
-    <!-- Checks summary -->
-    <div class="card" style="margin-bottom:.75rem" x-show="preview && preview.checks && preview.checks.length">
+    <!-- Checks summary + per-check configuration -->
+    <div class="card" style="margin-bottom:.75rem"
+         x-show="generatedChecks.length || (preview && preview.checks && preview.checks.length)">
       <h2 style="margin:0 0 .75rem;font-size:15px">
         Checks
         <span style="font-weight:400;color:var(--text-muted);font-size:13px"
-              x-text="'(' + (preview ? preview.checks.length : 0) + ' total)'"></span>
+              x-text="'(' + (generatedChecks.length || (preview ? preview.checks.length : 0)) + ' total)'"></span>
       </h2>
-      <template x-for="chk in (preview ? preview.checks : [])" :key="chk.id || chk.assertion">
-        <div style="display:flex;gap:.5rem;align-items:baseline;padding:.3rem 0;
-                    border-bottom:1px solid var(--border);font-size:13px">
-          <span class="badge"
-                :class="chk.type === 'template' ? 'badge-neutral' : chk.type === 'judge' ? 'badge-accent' : 'badge-warning'"
-                style="flex-shrink:0;font-size:11px"
-                x-text="chk.type"></span>
-          <span style="color:var(--text-primary)" x-text="chk.assertion || chk.id"></span>
+      <!-- Configurable list from the persisted version -->
+      <template x-if="generatedChecks.length">
+        <div>
+          <template x-for="(chk, ci) in generatedChecks" :key="chk.suite_id + '/' + chk.case_id + '/' + chk.check_index">
+            <div x-data="{ editing: false, draft: JSON.stringify(chk.params || {}, null, 2), saved: false }"
+                 style="padding:.4rem 0;border-bottom:1px solid var(--border);font-size:13px">
+              <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+                <span class="badge"
+                      :class="chk.type === 'template' ? 'badge-template' : chk.type === 'judge' ? 'badge-judge' : 'badge-generated'"
+                      style="flex-shrink:0;font-size:11px" x-text="chk.type"></span>
+                <span class="badge"
+                      :class="chk.determinism === 'stochastic' ? 'badge-accent' : 'badge-neutral'"
+                      style="flex-shrink:0;font-size:11px"
+                      x-text="chk.determinism === 'stochastic' ? 'Stochastic' : 'Deterministic'"></span>
+                <span style="color:var(--text-primary)" x-text="chk.assertion || chk.case_id"></span>
+                <button type="button" class="btn btn-ghost"
+                        style="margin-left:auto;font-size:11px;padding:.15rem .4rem"
+                        @click="editing = !editing; saved = false"
+                        x-show="chk.type === 'template' || chk.type === 'judge'">
+                  <i class="ti ti-adjustments" aria-hidden="true"></i>
+                  <span x-text="editing ? 'Close' : 'Edit params'"></span>
+                </button>
+              </div>
+              <div x-show="editing" style="margin-top:.4rem">
+                <textarea x-model="draft" rows="4"
+                          style="width:100%;font-family:monospace;font-size:12px;resize:vertical"></textarea>
+                <div style="display:flex;gap:.5rem;align-items:center;margin-top:.35rem">
+                  <button type="button" class="btn btn-primary" style="font-size:11px"
+                          @click="try { await saveCheckParams(chk, JSON.parse(draft)); saved = true; } catch(e) { alert('Invalid JSON'); }">
+                    <i class="ti ti-device-floppy" aria-hidden="true"></i> Save params
+                  </button>
+                  <span x-show="saved" class="badge badge-pass" style="font-size:11px">
+                    <i class="ti ti-check" aria-hidden="true"></i> Saved</span>
+                </div>
+              </div>
+            </div>
+          </template>
         </div>
+      </template>
+      <!-- Fallback preview list (no persisted checks) -->
+      <template x-if="!generatedChecks.length">
+        <template x-for="chk in (preview ? preview.checks : [])" :key="chk.id || chk.assertion">
+          <div style="display:flex;gap:.5rem;align-items:baseline;padding:.3rem 0;
+                      border-bottom:1px solid var(--border);font-size:13px">
+            <span class="badge"
+                  :class="chk.type === 'template' ? 'badge-neutral' : chk.type === 'judge' ? 'badge-accent' : 'badge-warning'"
+                  style="flex-shrink:0;font-size:11px"
+                  x-text="chk.type"></span>
+            <span class="badge"
+                  :class="chk.type === 'judge' ? 'badge-accent' : 'badge-neutral'"
+                  style="flex-shrink:0;font-size:11px"
+                  x-text="chk.type === 'judge' ? 'Stochastic' : 'Deterministic'"></span>
+            <span style="color:var(--text-primary)" x-text="chk.assertion || chk.id"></span>
+          </div>
+        </template>
       </template>
     </div>
 

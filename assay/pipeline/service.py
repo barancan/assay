@@ -78,6 +78,52 @@ def update_version_config(
         pv.content_hash = ch
 
 
+def update_check_params(
+    version_id: int,
+    suite_id: str,
+    case_id: str,
+    check_index: int,
+    params: dict,
+) -> None:
+    """Replace the `with` params of a single check in a draft PipelineVersion.
+
+    Locates config.suites[suite_id].cases[case_id].checks[check_index] and swaps
+    its `with` dict, then recomputes the content hash. Draft only.
+    """
+    import copy
+    with session_scope() as s:
+        pv = s.get(PipelineVersion, version_id)
+        if pv is None:
+            raise ValueError(f"PipelineVersion {version_id} not found")
+        if pv.status != "draft":
+            raise ValueError(f"Can only update draft versions (status: {pv.status})")
+        # Deep-copy so the reassignment is a genuinely distinct object from the
+        # loaded value — otherwise SQLAlchemy's JSON column won't flag the change.
+        config = copy.deepcopy(dict(pv.config or {}))
+        suites = config.get("suites", [])
+        target = None
+        for suite in suites:
+            if suite.get("id") != suite_id:
+                continue
+            for case in suite.get("cases", []):
+                if case.get("id") != case_id:
+                    continue
+                checks = case.get("checks", [])
+                if check_index < 0 or check_index >= len(checks):
+                    raise ValueError(
+                        f"check_index {check_index} out of range for {suite_id}/{case_id}"
+                    )
+                target = checks[check_index]
+                break
+            if target is not None:
+                break
+        if target is None:
+            raise ValueError(f"check not found: {suite_id}/{case_id}[{check_index}]")
+        target["with"] = params
+        pv.config = config
+        pv.content_hash = content_hash(config, pv.generated_sources or {}, pv.rubrics or {})
+
+
 def import_from_yaml(
     spec_path: str,
     project: str,
