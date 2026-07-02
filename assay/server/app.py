@@ -240,14 +240,24 @@ def list_pipelines(request: Request):
         ]
 
 
-_STARTER_TEMPLATES = [
-    {"id": "valid_json",        "label": "Valid JSON",        "text": "The response must be valid JSON."},
-    {"id": "no_pii",            "label": "No PII",            "text": "No personally identifiable information in the output."},
-    {"id": "citation_present",  "label": "Citation present",  "text": "Every finding cites a source article or document."},
-    {"id": "refusal_handling",  "label": "Refusal handling",  "text": "The model should decline or express uncertainty rather than hallucinate."},
-    {"id": "latency_budget",    "label": "Latency budget",    "text": "Response in under 2 000 ms (p95)."},
-    {"id": "rag_faithfulness",  "label": "RAG faithfulness",  "text": "Answer only from the provided context—no fabrication."},
-    {"id": "toxicity_free",     "label": "Toxicity-free",     "text": "Output must be free from toxic or harmful language."},
+_METRIC_CATALOGUE = [
+    # format / correctness
+    {"id": "valid_json",        "label": "Valid JSON",         "determinism": "deterministic", "category": "format",      "default_threshold": None, "text": "The response must be valid JSON."},
+    {"id": "citation_present",  "label": "Citation present",   "determinism": "deterministic", "category": "correctness", "default_threshold": None, "text": "Every finding cites a source article or document."},
+    # safety
+    {"id": "pii_absent",        "label": "No PII",             "determinism": "deterministic", "category": "safety",      "default_threshold": None, "text": "No personally identifiable information in the output."},
+    {"id": "refusal_detector",  "label": "Refusal handling",   "determinism": "deterministic", "category": "safety",      "default_threshold": None, "text": "The model should decline or express uncertainty rather than hallucinate."},
+    {"id": "toxicity_free",     "label": "Toxicity-free",      "determinism": "stochastic",    "category": "safety",      "default_threshold": 0.90, "text": "Output must be free from toxic or harmful language."},
+    {"id": "hallucination",     "label": "Hallucination-free", "determinism": "stochastic",    "category": "safety",      "default_threshold": 0.85, "text": "The response must not contain fabricated facts."},
+    # performance
+    {"id": "latency_bound",     "label": "Latency budget",     "determinism": "deterministic", "category": "performance", "default_threshold": None, "text": "Response in under 2000 ms (p95)."},
+    # rag
+    {"id": "faithfulness",      "label": "RAG faithfulness",   "determinism": "stochastic",    "category": "rag",         "default_threshold": 0.80, "text": "Answer only from the provided context — no fabrication."},
+    {"id": "answer_relevance",  "label": "Answer relevance",   "determinism": "stochastic",    "category": "rag",         "default_threshold": 0.80, "text": "The answer directly addresses the question asked."},
+    {"id": "context_precision", "label": "Context precision",  "determinism": "stochastic",    "category": "rag",         "default_threshold": 0.75, "text": "Only relevant context passages are used in the answer."},
+    {"id": "context_recall",    "label": "Context recall",     "determinism": "stochastic",    "category": "rag",         "default_threshold": 0.75, "text": "The answer covers all key points from the retrieved context."},
+    # quality
+    {"id": "task_completion",   "label": "Task completion",    "determinism": "stochastic",    "category": "quality",     "default_threshold": 0.80, "text": "The response fully completes the requested task."},
 ]
 _ADAPTER_NAMES = ["mock", "anthropic", "openai_compat", "ollama", "rest"]
 
@@ -280,7 +290,7 @@ def pipeline_new_page(request: Request, resume: int | None = None, project: str 
                     "key_env": target.get("key_env") or "",
                 }
     return templates.TemplateResponse(request, "pipeline_new.html", {
-        "starter_templates": _STARTER_TEMPLATES,
+        "metric_catalogue": _METRIC_CATALOGUE,
         "adapter_names": _ADAPTER_NAMES,
         "judge_adapter": judge_adapter,
         "judge_model": judge_model,
@@ -333,7 +343,12 @@ def pipeline_preview(body: PreviewBody):
     from ..generator.build import derive_intents
     intents = derive_intents(body.requirements, judge=None)
     checks = [
-        {"id": it["id"], "type": it.get("how", "template"), "assertion": it.get("assertion", "")}
+        {
+            "id": it["id"],
+            "type": it.get("how", "template"),
+            "assertion": it.get("assertion", ""),
+            "threshold": it.get("threshold"),
+        }
         for it in intents
     ]
     return {"checks": checks, "estimated_minutes": max(2, len(checks))}
