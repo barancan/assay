@@ -260,7 +260,10 @@ _METRIC_CATALOGUE = [
     # quality
     {"id": "task_completion",   "label": "Task completion",    "determinism": "stochastic",    "category": "quality",     "default_threshold": 0.80, "text": "The response fully completes the requested task."},
 ]
-_ADAPTER_NAMES = ["mock", "anthropic", "openai_compat", "ollama", "rest"]
+# No "mock": it is a test fixture, and offering it here is how a user ends up with a
+# green report about nothing. It stays reachable via ASSAY_ALLOW_MOCK for the test suite
+# and the offline example.
+_ADAPTER_NAMES = ["anthropic", "openai_compat", "ollama", "rest"]
 
 
 @app.get("/pipelines/new", response_class=HTMLResponse)
@@ -285,7 +288,7 @@ def pipeline_new_page(request: Request, resume: int | None = None, project: str 
                     "step_reached": pv.step_reached or "define",
                     "project": pipe.project if pipe else "",
                     "name": pipe.name if pipe else "",
-                    "adapter": target.get("adapter") or "mock",
+                    "adapter": target.get("adapter") or _ADAPTER_NAMES[0],
                     "model": target.get("model") or "",
                     "endpoint": target.get("endpoint") or "",
                     "key_env": target.get("key_env") or "",
@@ -431,6 +434,7 @@ def pipeline_generate(
 ):
     import yaml
     from ..generator.build import cases_for_intents, intents_to_spec, resolve_interface, rubric_for
+    from ..llm.provider import LLMConfigError
     from ..pipeline import create_version
     from ..pipeline.service import update_step_reached, activate_version, update_version_config
     actor = _require_identity(request, x_assay_user)
@@ -447,8 +451,13 @@ def pipeline_generate(
         cases = cases_for_intents(intents, iface, llm)
     except Exception as e:
         raise HTTPException(422, f"could not generate case inputs: {e}"[:200])
-    spec_dict = intents_to_spec(body.project, intents, body.adapter_spec, judges,
-                                iface=iface, cases_by_intent=cases)
+    try:
+        spec_dict = intents_to_spec(body.project, intents, body.adapter_spec, judges,
+                                    iface=iface, cases_by_intent=cases)
+    except LLMConfigError as e:
+        # Graded checks with no judge configured. A 500 here would read as a server bug;
+        # it is a configuration the user can fix in Settings.
+        raise HTTPException(422, _llm_config_detail(e))
     spec_dict["requirements"] = body.requirements  # persist so wizard can restore it
     # Judge checks reference a rubric path; store the rubric alongside so the version is
     # runnable without a disk checkout.
