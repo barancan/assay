@@ -32,15 +32,23 @@ def get_judge_provider(judge: JudgeSpec) -> Any:
     cls = _JUDGES.get(judge.provider)
     if cls is None:
         raise ValueError(f"unknown judge provider: {judge.provider}")
-    return cls(model=judge.model)
+    # endpoint/key_env/params are what let a judge point at a local vLLM or a
+    # second key; they used to be declared and dropped on the floor here.
+    kwargs = {"model": judge.model, "endpoint": judge.endpoint,
+              "key_env": judge.key_env, "params": judge.params}
+    return cls(**{k: v for k, v in kwargs.items() if v})
 
 
 def test_connection(adapter: Any) -> None:
-    """Ping the target; raise ConnectionError with the endpoint in the message on failure."""
+    """Ping the target; raise ConnectionError naming the endpoint or the missing key."""
     result = adapter.ping()
-    if not result["ok"]:
-        desc = adapter.describe()
-        endpoint = desc.get("endpoint") or desc.get("adapter", "unknown")
-        raise ConnectionError(
-            f"Cannot reach target at {endpoint}: {result.get('error', 'unknown error')}"
-        )
+    if result["ok"]:
+        return
+    desc = adapter.describe()
+    endpoint = desc.get("endpoint") or desc.get("adapter", "unknown")
+    error = result.get("error") or "unknown error"
+    if result.get("authenticated") is False:
+        # Reached (or could not even try) but has no usable credential -- say so
+        # rather than blaming the network.
+        raise ConnectionError(f"Cannot authenticate to {endpoint}: {error}")
+    raise ConnectionError(f"Cannot reach target at {endpoint}: {error}")

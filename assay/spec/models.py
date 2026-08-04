@@ -8,19 +8,26 @@ class TargetSpec(BaseModel):
     adapter: str                              # mock | openai_compat | anthropic | ollama | rest
     model: str | None = None
     endpoint: str | None = None
+    key_env: str | None = None               # env var holding the API key (name, never value)
     import_: str | None = Field(default=None, alias="import")   # postman/openapi file
     request: str | None = None               # named request inside a collection
     params: dict[str, Any] = Field(default_factory=dict)
     variables: dict[str, Any] = Field(default_factory=dict)
     auth: dict[str, Any] = Field(default_factory=dict)
 
-    model_config = {"populate_by_name": True}
+    # forbid: a field the UI collects but the model does not declare used to vanish
+    # silently (that is how key_env was lost). Now it is a loud validation error.
+    model_config = {"populate_by_name": True, "extra": "forbid"}
 
 
 class JudgeSpec(BaseModel):
     provider: str                            # anthropic | openai | ollama | openai_compat
     model: str
+    endpoint: str | None = None              # so a judge can point at a local vLLM
+    key_env: str | None = None               # env var holding the API key (name, never value)
     params: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = {"extra": "forbid"}
 
 
 class CheckSpec(BaseModel):

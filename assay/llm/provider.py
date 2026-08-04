@@ -78,6 +78,34 @@ def credential_status(adapter: str, key_env: str | None = None) -> dict:
     }
 
 
+def credential_overview() -> list[dict]:
+    """credential_status() for every adapter Assay knows about, in declaration order.
+
+    What the Settings > Providers card renders. Names only -- no values.
+    """
+    return [credential_status(name) for name in DEFAULT_KEY_ENV]
+
+
+def read_key(adapter: str, key_env: str | None = None) -> str | None:
+    """Return the credential *value* for `adapter`, or None when it needs none.
+
+    The only place a key value is read. Callers use it to construct a client and
+    must not store it on an instance, log it, or return it. Raises LLMConfigError
+    when a required variable is unset or empty.
+    """
+    env_var = key_env_for(adapter, key_env)
+    if env_var is None:
+        return None
+    value = os.environ.get(env_var, "")
+    if not value:
+        raise LLMConfigError(
+            f"{adapter} is not configured: set ${env_var} in the environment",
+            adapter=adapter,
+            env_var=env_var,
+        )
+    return value
+
+
 def require_credential(adapter: str, key_env: str | None = None) -> None:
     """Raise LLMConfigError unless `adapter` is known and its credential is present."""
     status = credential_status(adapter, key_env)

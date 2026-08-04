@@ -31,6 +31,7 @@ _DIR = os.path.dirname(__file__)
 _TEMPLATES_DIR = os.path.join(_DIR, "templates")
 _STATIC_DIR = os.path.join(_DIR, "static")
 
+from html import escape
 from urllib.parse import quote as _urlquote
 
 templates = Jinja2Templates(directory=_TEMPLATES_DIR)
@@ -315,6 +316,8 @@ def connection_test_route(body: ConnectionTestBody):
         spec["model"] = body.model
     if body.endpoint:
         spec["endpoint"] = body.endpoint
+    if body.key_env:
+        spec["key_env"] = body.key_env
     result = test_connection(spec)
     if result.get("ok"):
         ms = result.get("latency_ms") or 0
@@ -323,8 +326,17 @@ def connection_test_route(body: ConnectionTestBody):
             f'<i class="ti ti-circle-check" aria-hidden="true"></i>'
             f" Connected {ms:.0f} ms</span>"
         )
+    elif result.get("authenticated") is False:
+        # Reachable (or not even tried) but no usable credential — distinct from
+        # "unreachable", and never a green badge.
+        msg = escape((result.get("error") or "no credential")[:120])
+        html = (
+            f'<span id="connection-result" class="badge badge-warning">'
+            f'<i class="ti ti-alert-triangle" aria-hidden="true"></i>'
+            f" Not authenticated — {msg}</span>"
+        )
     else:
-        err = (result.get("error") or "connection failed")[:120]
+        err = escape((result.get("error") or "connection failed")[:120])
         html = (
             f'<span id="connection-result" class="badge badge-fail">'
             f'<i class="ti ti-circle-x" aria-hidden="true"></i>'
@@ -445,6 +457,7 @@ def save_pipeline_draft(
 
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request):
+    from ..llm.provider import builder_choice, credential_overview
     with session_scope() as s:
         users = s.query(User).order_by(User.role, User.name).all()
         user_list = [{"name": u.name, "role": u.role} for u in users]
@@ -452,10 +465,15 @@ def settings_page(request: Request):
         jm = s.get(WorkspaceSetting, "judge_model")
         judge_adapter = ja.value if ja else "anthropic"
         judge_model = jm.value if jm else "claude-haiku-4-5-20251001"
+    builder_adapter, builder_model = builder_choice()
     return templates.TemplateResponse(request, "settings.html", {
         "users": user_list,
         "judge_adapter": judge_adapter,
         "judge_model": judge_model,
+        # Variable names and a configured yes/no — never a key value.
+        "provider_credentials": credential_overview(),
+        "builder_adapter": builder_adapter,
+        "builder_model": builder_model,
         "auth_mode": _config.auth_mode(),
         "identity": _identity(request),
     })
@@ -482,6 +500,28 @@ def update_judge_settings(body: JudgeSettingsBody):
     with session_scope() as s:
         s.merge(WorkspaceSetting(key="judge_adapter", value=body.judge_adapter))
         s.merge(WorkspaceSetting(key="judge_model", value=body.judge_model))
+    return {"ok": True}
+
+
+@app.get("/settings/builder")
+def settings_builder():
+    # Defaults are resolved at read time (judge settings, then built-in), so an
+    # existing workspace does not need a seed row it will never get.
+    from ..llm.provider import builder_choice
+    adapter, model = builder_choice()
+    return {"builder_adapter": adapter, "builder_model": model}
+
+
+class BuilderSettingsBody(BaseModel):
+    builder_adapter: str
+    builder_model: str
+
+
+@app.post("/settings/builder")
+def update_builder_settings(body: BuilderSettingsBody):
+    with session_scope() as s:
+        s.merge(WorkspaceSetting(key="builder_adapter", value=body.builder_adapter))
+        s.merge(WorkspaceSetting(key="builder_model", value=body.builder_model))
     return {"ok": True}
 
 
