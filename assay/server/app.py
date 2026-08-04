@@ -11,6 +11,7 @@ resolves and forwards the actor name.
 from __future__ import annotations
 import json
 import os
+from pathlib import Path
 from fastapi import FastAPI, Header, HTTPException, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -937,6 +938,11 @@ def import_pipeline(body: ImportBody):
 def _build_check_list(pv) -> list[dict]:
     """Flatten config.suites[].cases[].checks[] into a list with resolved source/rubric."""
     checks = []
+    # Codegen's own record of the build: the dry-run each generated check passed, and
+    # the intents that wanted a mechanical check and had to settle for a judge.
+    meta = (pv.config or {}).get("build_meta") or {}
+    dry_runs = meta.get("codegen") or {}
+    fallbacks = {f.get("intent_id"): f for f in (meta.get("codegen_failures") or [])}
     for suite in (pv.config or {}).get("suites", []):
         for case in suite.get("cases", []):
             for idx, chk in enumerate(case.get("checks", [])):
@@ -944,13 +950,20 @@ def _build_check_list(pv) -> list[dict]:
                 key = None
                 source = None
                 rubric_text = None
+                dry_run = None
+                fallback = None
                 if ctype == "generated":
                     key = chk.get("uses", "")
                     source = (pv.generated_sources or {}).get(key, "")
+                    dry_run = dry_runs.get(key)
                 elif ctype == "judge":
                     key = chk.get("rubric", "")
                     rubric_text = (pv.rubrics or {}).get(key, "")
+                    # generated/rubrics/<intent_id>.yaml — the same id codegen recorded.
+                    fallback = fallbacks.get(Path(key).stem) if key else None
                 checks.append({
+                    "dry_run": dry_run,
+                    "codegen_fallback": fallback,
                     "suite_id": suite.get("id", ""),
                     "case_id": case.get("id", ""),
                     "check_index": idx,
@@ -1075,10 +1088,14 @@ def regenerate_check_route(
     request: Request,
     x_assay_user: str | None = Header(default=None),
 ):
-    from ..pipeline.service import regenerate_check
+    from ..pipeline.service import CodegenError, regenerate_check
     actor = _require_identity(request, x_assay_user)
     try:
         new_version_id = regenerate_check(version_id, check_path, actor)
+    except CodegenError as e:
+        # The version is untouched: nothing broken was persisted. 422 rather than 404
+        # so the reviewer sees the model's problem, not a missing-resource error.
+        raise HTTPException(422, str(e))
     except ValueError as e:
         status = 409 if "draft" in str(e) else 404
         raise HTTPException(status, str(e))

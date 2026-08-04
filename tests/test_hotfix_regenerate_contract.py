@@ -3,8 +3,11 @@
 regenerate_check previously emitted `def <stem>(response, **kwargs): return True`, but
 the sandbox requires a module-level `check(response, context) -> dict`. Every regenerated
 check therefore died at run time with "module defines no check(response, context)".
-Codegen is still unimplemented, so the scaffold fails loudly -- but it must fail as a
-check verdict, not as a contract violation.
+
+These tests cover the path with NO builder model configured, which is what the suite
+runs with: there is nothing to generate from, so the stored source is a scaffold that
+names the reason -- and it must fail as a check verdict, not as a contract violation.
+Regeneration with a model is covered in test_p4_codegen.py.
 """
 from __future__ import annotations
 
@@ -64,7 +67,7 @@ def test_regenerated_source_defines_the_contract_function():
 
 
 def test_regenerated_check_runs_in_the_sandbox(tmp_path):
-    """The scaffold must produce a check verdict, not a contract violation."""
+    """The no-model scaffold must produce a check verdict, not a contract violation."""
     from assay.sandbox import run_generated_check
 
     path = tmp_path / "genchk.py"
@@ -72,7 +75,8 @@ def test_regenerated_check_runs_in_the_sandbox(tmp_path):
 
     out = run_generated_check(str(path), {"text": "hi"}, {"input": {}})
     assert out["passed"] is False
-    assert "unimplemented scaffold" in out["message"]
+    assert "was not generated" in out["message"]
+    assert "no builder model" in out["message"]
     assert "no check(response, context)" not in out["message"]
 
 
