@@ -17,7 +17,7 @@ report that a named human must sign off before it is considered production ready
 
 - **Eval-as-code.** The pipeline (`assay.yaml` + `generated/`) lives in your repo, diffable and version-pinned.
 - **Three ways to test.** Vetted templates where a mechanical check fits; LLM-generated Python (sandboxed) where it does not; LLM judges for semantic calls. *Templates and judges work today; generated-function codegen is [planned](docs/STATUS.md#builder-requirements--pipeline).*
-- **Provider-agnostic.** Targets and judges: Anthropic, OpenAI / OpenAI-compatible, Ollama, and generic REST with Postman import.
+- **Provider-agnostic.** Targets and judges: Anthropic, OpenAI / OpenAI-compatible, Ollama, and generic REST with Postman or OpenAPI import.
 - **Auditable and gated.** Every run records the tested model, test cases, full responses, and the approver. Reports move `pending → ready_for_review → done`; automation can trigger runs but only a reviewer can promote to `done`.
 
 ## Install
@@ -130,7 +130,8 @@ What that looks like in the current build:
 | Template checks | Working — 11 primitives |
 | Generated functions | **Not implemented.** Routing an intent to `generated` produces a spec entry with no source behind it |
 | Judge rubrics | A fixed single-dimension rubric, not the anchored multi-dimension rubric the design describes |
-| Test cases | Emitted with empty inputs; the target interface is not parsed at build time |
+| Test cases | Emitted with empty inputs |
+| Interface grounding | The target's interface is parsed — Postman collections (nested folders, named requests, `{{variables}}`, auth), OpenAPI 3 in JSON or YAML (local `$ref`s resolved, request fields and JSONPath response paths derived), and MCP tool schemas. The `rest` adapter imports through the same parser. Not yet consumed by case generation |
 
 Closing this gap is the current priority — see the roadmap in
 [`docs/STATUS.md`](docs/STATUS.md).
@@ -155,11 +156,15 @@ is not a boundary for genuinely untrusted third-party code. A hardened tier
 
 | Kind | Built-in |
 |---|---|
-| Target | `mock` (tests only), `rest` (Postman import), `anthropic`, `openai_compat`, `ollama` |
+| Target | `mock` (tests only), `rest` (Postman + OpenAPI import), `anthropic`, `openai_compat`, `ollama` |
 | Judge  | `anthropic`, `openai_compat`, `ollama`, `mock` (tests only) |
 
-Planned, not yet implemented: `mcp` and `custom` target adapters, and OpenAPI
-import for `rest` (only Postman collections parse today).
+`rest` imports Postman collections and OpenAPI 3 documents (JSON or YAML), reading
+them with the same parser the builder grounds on (`assay/generator/interface.py`).
+
+Planned, not yet implemented: `mcp` and `custom` target adapters. An MCP tool
+descriptor already parses into a target interface, but there is no adapter that calls
+one.
 
 ## License
 
