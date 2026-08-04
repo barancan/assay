@@ -409,3 +409,44 @@ def test_generation_is_grounded_by_the_interface_when_there_is_one():
                                                     input_fields=["text"],
                                                     response_paths=["$.findings[*]"]))
     assert "$.findings[*]" in llm.prompts[0]
+
+
+# ── the web path must not be weaker than the CLI ────────────────────────────
+
+def test_web_generate_uses_the_builder_model_for_rubrics(tmp_path, monkeypatch):
+    """The UI passed no model, so every rubric was the deterministic fallback."""
+    monkeypatch.setenv("ASSAY_HOME", str(tmp_path / ".assay"))
+    monkeypatch.setenv("ASSAY_DB_URL", f"sqlite:///{tmp_path / 'web.db'}")
+    import importlib, assay.config, assay.store.db
+    importlib.reload(assay.config)
+    importlib.reload(assay.store.db)
+    from assay.store.db import init_db
+    init_db()
+
+    import assay.generator.build as build
+    seen = {}
+    original = build.rubric_for
+
+    def spy(intent, llm=None, *, interface=None):
+        seen["llm"] = llm
+        seen["interface"] = interface
+        return original(intent, llm, interface=interface)
+
+    monkeypatch.setattr(build, "rubric_for", spy)
+
+    from fastapi.testclient import TestClient
+    from assay.server.app import app
+    from tests.conftest import HeuristicBuilderLLM
+
+    fake = HeuristicBuilderLLM()
+    monkeypatch.setattr("assay.llm.provider.resolve_builder_llm", lambda project=None: fake)
+
+    resp = TestClient(app).post("/pipelines/generate", json={
+        "project": "rub", "name": "rub",
+        "requirements": "- The model must decline to answer when it is uncertain.",
+        "adapter_spec": {"adapter": "mock"},
+    }, headers={"X-Assay-User": "alice"})
+
+    assert resp.status_code == 200, resp.text
+    assert seen, "rubric_for was never called for a judge intent"
+    assert seen["llm"] is fake, "the web path must hand the builder model to rubric generation"

@@ -29,15 +29,17 @@ def _git_commit() -> str | None:
         return None
 
 
-def _interface_hash(spec: Spec) -> str | None:
-    """Hash of the target's interface description, so a run records what it tested against.
+def _interface_hash(target) -> str | None:
+    """Hash of the interface description this target was built against, when there is one.
 
-    The column has existed since the first schema and was never populated, which meant a
-    report could not tell you whether the interface had changed underneath it.
+    Recorded on the run's TargetModel so a report can say which request/response shape
+    the pipeline assumed -- an interface that changed under a pipeline is exactly what
+    makes yesterday's green run meaningless. The column has existed since the first
+    schema and went unpopulated until now.
     """
     try:
         from ..generator.interface import interface_from_target
-        return interface_from_target(spec.target).hash or None
+        return interface_from_target(target).hash or None
     except Exception:
         # Provenance is worth recording but never worth failing a run over.
         return None
@@ -169,7 +171,7 @@ def _setup_run(
             tm = TargetModel(project=spec.project, adapter=spec.target.adapter,
                              model=spec.target.model, endpoint=spec.target.endpoint,
                              params=spec.target.params,
-                             interface_hash=_interface_hash(spec))
+                             interface_hash=_interface_hash(spec.target))
             s.add(tm)
             s.flush()
             run = Run(project=spec.project, spec_hash=spec_hash(spec),

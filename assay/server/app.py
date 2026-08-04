@@ -289,6 +289,9 @@ def pipeline_new_page(request: Request, resume: int | None = None, project: str 
                     "model": target.get("model") or "",
                     "endpoint": target.get("endpoint") or "",
                     "key_env": target.get("key_env") or "",
+                    # Without this the wizard would rebuild adapter_spec without the
+                    # interface file, silently ungrounding an edited pipeline.
+                    "interface_file": target.get("import") or "",
                 }
     return templates.TemplateResponse(request, "pipeline_new.html", {
         "metric_catalogue": _METRIC_CATALOGUE,
@@ -350,7 +353,17 @@ class PreviewBody(BaseModel):
     adapter: str | None = None
 
 
-def _derive_intents_or_422(requirements: str, project: str | None = None) -> list[dict]:
+def _builder_llm_or_422(project: str | None = None):
+    """The workspace's builder model, or a 422 naming the variable to set."""
+    from ..llm.provider import LLMConfigError, resolve_builder_llm
+    try:
+        return resolve_builder_llm(project)
+    except LLMConfigError as e:
+        raise HTTPException(422, _llm_config_detail(e))
+
+
+def _derive_intents_or_422(requirements: str, project: str | None = None,
+                           llm=None) -> list[dict]:
     """Build intents with the workspace's builder model.
 
     Every failure becomes a 422 whose detail is something the user can act on — the name
@@ -359,11 +372,8 @@ def _derive_intents_or_422(requirements: str, project: str | None = None) -> lis
     a real one once persisted, so it must never happen by accident.
     """
     from ..generator.build import derive_intents
-    from ..llm.provider import LLMConfigError, resolve_builder_llm
-    try:
-        llm = resolve_builder_llm(project)
-    except LLMConfigError as e:
-        raise HTTPException(422, _llm_config_detail(e))
+    from ..llm.provider import LLMConfigError
+    llm = llm if llm is not None else _builder_llm_or_422(project)
     try:
         return derive_intents(requirements, judge=llm)
     except LLMConfigError as e:
@@ -420,18 +430,35 @@ def pipeline_generate(
     x_assay_user: str | None = Header(default=None),
 ):
     import yaml
-    from ..generator.build import rubric_for, intents_to_spec
+    from ..generator.build import cases_for_intents, intents_to_spec, resolve_interface, rubric_for
     from ..pipeline import create_version
     from ..pipeline.service import update_step_reached, activate_version, update_version_config
     actor = _require_identity(request, x_assay_user)
-    intents = _derive_intents_or_422(body.requirements, body.project)
+    llm = _builder_llm_or_422(body.project)
+    intents = _derive_intents_or_422(body.requirements, body.project, llm=llm)
     judges = {"primary": body.judge_spec} if body.judge_spec else {}
-    spec_dict = intents_to_spec(body.project, intents, body.adapter_spec, judges)
+    # Cases carry the inputs the target is actually invoked with, so they are grounded
+    # on the interface file the user pointed at (adapter_spec["import"]) when there is one.
+    try:
+        iface = resolve_interface(None, body.adapter_spec)
+    except (OSError, ValueError) as e:
+        raise HTTPException(422, f"could not read the interface file: {e}"[:200])
+    try:
+        cases = cases_for_intents(intents, iface, llm)
+    except Exception as e:
+        raise HTTPException(422, f"could not generate case inputs: {e}"[:200])
+    spec_dict = intents_to_spec(body.project, intents, body.adapter_spec, judges,
+                                iface=iface, cases_by_intent=cases)
     spec_dict["requirements"] = body.requirements  # persist so wizard can restore it
     # Judge checks reference a rubric path; store the rubric alongside so the version is
     # runnable without a disk checkout.
-    rubrics = {f"generated/rubrics/{it['id']}.yaml": yaml.safe_dump(rubric_for(it), sort_keys=False)
-               for it in intents if it["how"] == "judge"}
+    # Pass the builder model: without it every rubric would be the deterministic
+    # fallback, so the UI would quietly produce weaker rubrics than the CLI.
+    rubrics = {
+        f"generated/rubrics/{it['id']}.yaml":
+            yaml.safe_dump(rubric_for(it, llm, interface=iface), sort_keys=False)
+        for it in intents if it["how"] == "judge"
+    }
     if body.pipeline_version_id:
         update_version_config(body.pipeline_version_id, spec_dict, {}, rubrics)
         version_id = body.pipeline_version_id

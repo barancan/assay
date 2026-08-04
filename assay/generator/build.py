@@ -9,13 +9,16 @@ The full LLM generator (route decision, codegen, rubric gen) is documented in th
 this module implements intent derivation and spec assembly.
 """
 from __future__ import annotations
+import copy
 import json
 import re
 from pathlib import Path
 
 from ..checks.library import REGISTRY as _TEMPLATES
 from ..llm.provider import LLMConfigError
+from .casegen import dataset_to_cases, deterministic_cases, generate_cases, load_dataset
 from .ingest import format_for_prompt, split_requirements
+from .interface import Interface, parse_interface
 
 _INTENT_PROMPT = (
     "You convert software/model assessment requirements into a test pipeline.\n"
@@ -250,9 +253,23 @@ def derive_intents(requirements: str, judge=None, *, allow_heuristic: bool = Fal
     return _validate_intents(_parse_intent_json(getattr(out, "text", None)), reqs)
 
 
+def _cases_for(intent: dict, iface, cases_by_intent: dict | None) -> list[dict]:
+    """The cases to emit for one intent, guaranteed non-empty and with real inputs.
+
+    This is the last gate before a case is persisted: a case with an empty input runs
+    the target against nothing, which is the bug this phase exists to close.
+    """
+    supplied = (cases_by_intent or {}).get(intent["id"]) or []
+    cases = [c for c in supplied if isinstance(c.get("input"), dict) and c["input"]]
+    return cases or deterministic_cases(intent, iface, n=1)
+
+
 def intents_to_spec(project: str, intents: list[dict], target: dict,
-                    judges: dict) -> dict:
+                    judges: dict, iface=None,
+                    cases_by_intent: dict | None = None) -> dict:
+    iface = iface if iface is not None else Interface()
     suites: dict[str, list] = {}
+    used_ids: set[str] = set()
     for it in intents:
         check = {"type": it["how"]}
         if it["how"] == "template":
@@ -268,8 +285,20 @@ def intents_to_spec(project: str, intents: list[dict], target: dict,
         else:  # generated
             check["uses"] = f"generated/checks/{it['id']}.py"
         ref = it.get("requirement_ref") or "unmapped"
-        suites.setdefault(ref, []).append(
-            {"id": it["id"], "input": {}, "checks": [check]})
+        for case in _cases_for(it, iface, cases_by_intent):
+            # Case ids are a persisted column (CaseResult.case_id, 120 chars), so the
+            # composed id is bounded rather than however long the model felt like.
+            case_id = _ID_SAFE.sub("-", f"{it['id']}-{case['id']}").strip("-.")[:100]
+            while case_id in used_ids:
+                case_id = f"{case_id}-{len(used_ids)}"
+            used_ids.add(case_id)
+            # A copy per case: sharing one dict makes yaml.safe_dump emit anchors and
+            # aliases, and a spec humans are meant to review should read plainly.
+            emitted = {"id": case_id, "input": case["input"],
+                       "checks": [copy.deepcopy(check)]}
+            if isinstance(case.get("context"), dict) and case["context"]:
+                emitted["context"] = case["context"]
+            suites.setdefault(ref, []).append(emitted)
     return {
         "version": 1, "project": project, "target": target,
         "judges": judges or {"primary": {"provider": "mock", "model": "mock"}},
@@ -292,6 +321,34 @@ def rubric_for(intent: dict, llm=None, *, interface=None) -> dict:
     return generate_rubric(intent, llm, interface=interface)
 
 
+def cases_for_intents(intents: list[dict], iface, judge=None, *,
+                      dataset: str | None = None, n: int = 3) -> dict[str, list[dict]]:
+    """Inputs for every intent: bound to a dataset when one is given, generated otherwise.
+
+    A golden dataset is the alternative to generation, not a supplement to it -- when the
+    user supplies real cases, inventing more of them is noise.
+    """
+    if dataset:
+        bound = dataset_to_cases(load_dataset(dataset))
+        return {it["id"]: bound for it in intents}
+    return {it["id"]: generate_cases(it, iface, judge, n=n) for it in intents}
+
+
+def resolve_interface(interface_path: str | None, target: dict):
+    """Parse the interface the pipeline is grounded on, falling back to the target's own.
+
+    `parse_interface` is deliberately forgiving -- a document it cannot make sense of
+    yields an ungrounded Interface rather than taking the build down. A path the user
+    explicitly supplied and that does not exist is a different thing: silently building
+    an ungrounded pipeline would give them exactly what they asked not to have, with no
+    signal. So existence is checked here, at the boundary, and content is not.
+    """
+    path = interface_path or (target or {}).get("import")
+    if path and not Path(path).exists():
+        raise FileNotFoundError(f"interface file not found: {path}")
+    return parse_interface(path)
+
+
 def build_pipeline_to_db(
     requirements_path: str,
     target: dict,
@@ -301,6 +358,8 @@ def build_pipeline_to_db(
     project: str = "project",
     created_by: str | None = None,
     allow_heuristic: bool = False,
+    interface_path: str | None = None,
+    dataset: str | None = None,
 ) -> int:
     """Generate pipeline from requirements and persist as a draft PipelineVersion in DB.
 
@@ -313,7 +372,10 @@ def build_pipeline_to_db(
 
     requirements = Path(requirements_path).read_text()
     intents = derive_intents(requirements, judge, allow_heuristic=allow_heuristic)
-    spec_dict = intents_to_spec(project, intents, target, judges or {})
+    iface = resolve_interface(interface_path, target)
+    cases = cases_for_intents(intents, iface, judge, dataset=dataset)
+    spec_dict = intents_to_spec(project, intents, target, judges or {},
+                                iface=iface, cases_by_intent=cases)
 
     rubrics: dict[str, str] = {}
     for it in intents:
@@ -338,10 +400,14 @@ def build_pipeline_to_db(
 
 def build_pipeline(requirements_path: str, target: dict, out_dir: str,
                    judge=None, judges: dict | None = None, project: str = "project",
-                   allow_heuristic: bool = False) -> str:
+                   allow_heuristic: bool = False, interface_path: str | None = None,
+                   dataset: str | None = None) -> str:
     requirements = Path(requirements_path).read_text()
     intents = derive_intents(requirements, judge, allow_heuristic=allow_heuristic)
-    spec = intents_to_spec(project, intents, target, judges or {})
+    iface = resolve_interface(interface_path, target)
+    cases = cases_for_intents(intents, iface, judge, dataset=dataset)
+    spec = intents_to_spec(project, intents, target, judges or {},
+                           iface=iface, cases_by_intent=cases)
     out = Path(out_dir)
     (out / "generated" / "rubrics").mkdir(parents=True, exist_ok=True)
     (out / "generated" / "checks").mkdir(parents=True, exist_ok=True)
