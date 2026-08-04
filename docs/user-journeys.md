@@ -118,8 +118,8 @@ in an exported report.
 |---|---|---|---|---|---|---|
 | 1 | Choose adapter + model | `_adapter_fields.html`, `model_selector` | — | `_ADAPTER_NAMES`, `server/app.py:261` | — | **PARTIAL** — `mock` is offered as an ordinary choice; it must become test-only (P6) |
 | 2 | Test the connection | "Test connection", `pipeline_new.html:227` | `POST /connection-test` | `engine.connection.test_connection` | — | **BUILT** — a live badge with latency that now distinguishes unreachable from unauthenticated, naming the missing variable instead of showing a green "Connected" with no key |
-| 3 | Upload the interface file (Postman / OpenAPI / MCP) | step-2 file field | `POST /pipelines/generate` | `generator.ingest.parse_interface` | `TargetModel.interface_hash` | **MISSING** — no upload control, and the interface is never parsed at build time, so generated checks cannot reference real response fields (P3) |
-| 4 | Point at a golden dataset | step-2 dataset field | — | `generator.casegen.load_dataset` | — | **MISSING** — `datasets/` is scaffolded by `cli.py:25` and never read (P3) |
+| 3 | Supply the interface file (Postman / OpenAPI / MCP) | step-2 interface-file field, `_adapter_fields.html` | `POST /pipelines/generate` | `generator.interface.parse_interface` | `TargetSpec.import_`, `TargetModel.interface_hash` | **PARTIAL** — the field takes a server-side path (matching `assay generate --interface`) and the interface is parsed at build time, so cases use real request fields and the run records what it was tested against. A true browser file *upload* is not built |
+| 4 | Point at a golden dataset | — (CLI only) | — | `generator.casegen.load_dataset` | — | **PARTIAL** — `assay generate --dataset` binds cases to a `datasets/*.jsonl` file, and a malformed row names file and line. Not yet exposed in the wizard |
 
 **J5-F1 — endpoint unreachable:** the badge shows the error. **BUILT.**
 **J5-F2 — reachable but unauthorised (401):** names the missing key env var. **BUILT.**
@@ -138,7 +138,7 @@ The product's core moment. **Success:** a draft version whose checks a builder w
 | 4 | Materialise **template** checks | — | — | `checks/library.py:125` | config | **BUILT** — 11 of the design's 16 primitives |
 | 5 | Materialise **generated** checks | — | — | `generator.codegen.generate_check` | `PipelineVersion.generated_sources` | **MISSING** — `generator/build.py:144` hardcodes `generated_sources = {}`, so a `generated` intent produces a spec pointing at a file that is never written and the run dies at `sandbox/runner.py:103` (P4) |
 | 6 | Materialise **judge** rubrics | — | — | `generator.rubricgen.generate_rubric` | `PipelineVersion.rubrics` | **BUILT** — an LLM-authored rubric with at least two anchored dimensions, each anchor observable rather than a grading word, plus `min_score`, `require_evidence` and the verdict schema. Invalid output is repaired once, then falls back to a deterministic rubric that clears the same validator |
-| 7 | Generate concrete test cases | — | — | `generator.casegen.generate_cases` | config | **MISSING** — every case is `"input": {}` (`generator/build.py:98`) (P3) |
+| 7 | Generate concrete test cases | — | — | `generator.casegen.generate_cases` | config | **BUILT** — concrete inputs per intent, grounded on the interface's real request fields, with nominal, empty, boundary and hostile variants. A single gate means no path can emit a case with an empty input |
 | 8 | Auto-activate and land on Review | step 3 / `HX-Redirect` | — | `pipeline.service.activate_version:164` | version `status=active` | **BUILT** |
 
 **J6-F1 — no credentials:** 422 naming the env var, never a silent heuristic fallback — **BUILT**.
@@ -156,7 +156,7 @@ wizard (P0/P7).
 | 1 | Open the review screen | `pipeline_review.html` | `GET /pipelines/{pid}/versions/{vid}/review` | `server/app.py:813` | — | **BUILT** |
 | 2 | See every check with type + determinism badges | check rows, `pipeline_review.html:95` | `GET /pipelines/versions/{vid}/checks` | `server/app.py:847` | — | **BUILT** |
 | 3 | Expand a check's source or rubric | collapsible row | — | `generated_sources` / `rubrics` | — | **PARTIAL** — the panel renders, but `generated_sources` is always empty (P4) |
-| 4 | See requirement coverage in both directions | coverage meter, `pipeline_review.html:64-76` | — | `reporting.exporters._coverage:35` | — | **PARTIAL** — the bar is a check-*type* breakdown, not requirement coverage; uncovered requirements and orphan tests are never computed (P1/P3) |
+| 4 | See requirement coverage in both directions | coverage meter, `pipeline_review.html` | — | `reporting.exporters.coverage` | — | **PARTIAL** — the exported report names uncovered requirements and orphan tests in both directions; the review screen's bar is still a check-*type* breakdown and does not yet show it |
 | 5 | See what the build decided and why | rationale column | — | `config["build_meta"]` | — | **MISSING** — routing rationale is never persisted (P1) |
 
 ---
@@ -235,19 +235,21 @@ named so this table stays auditable.
 | # | Gap | Journey | Phase | State |
 |---|---|---|---|---|
 | 1 | No codegen — the stated differentiator does not exist | J6.5 | P4 | **Open** |
-| 2 | Empty cases, no interface grounding — generated checks cannot reference real fields | J6.7, J5.3 | P3 | **Open** |
-| 3 | Judge rubrics are a fixed single dimension, and evidence quotes are never verified | J6.6, J11.3 | P2 | **Open** |
-| 4 | No token or cost capture, so a real-model run reports zero spend | J10.6 | P5 | **Open** |
-| 5 | Mock adapters are still selectable as ordinary targets | J5.1 | P6 | **Open** |
-| 6 | No run history, trends, or regression detection | J12.3-5 | post-P6 | **Open** |
-| 7 | No spec export — the eval-as-code thesis is unreachable from the UI | J12.7 | post-P6 | **Open** |
-| 8 | Zero state and no Project entity | J1, J3 | UI polish | **Open** |
+| 2 | No token or cost capture, so a real-model run reports zero spend | J10.6 | P5 | **Open** |
+| 3 | Mock adapters are still selectable as ordinary targets | J5.1 | P6 | **Open** |
+| 4 | Run-level and suite-level gating are parsed and never enforced | J12.6 | post-P6 | **Open** |
+| 5 | No run history, trends, or regression detection | J12.3-5 | post-P6 | **Open** |
+| 6 | No spec export — the eval-as-code thesis is unreachable from the UI | J12.7 | post-P6 | **Open** |
+| 7 | Zero state and no Project entity | J1, J3 | UI polish | **Open** |
 | — | Judge rubrics never materialised — broke every run containing a judge check | J10.5 | hotfix | Closed |
 | — | "Regenerate" wrote code the sandbox could never load | J8.3 | hotfix | Closed |
 | — | Sandbox locked down after module load — the containment claim was false | J10.4 | hotfix | Closed |
-| — | The UI never called an LLM — the builder promise was unmet on the primary surface | J6.2, J4.4 | P1 | Closed |
+| — | The UI never called an LLM | J6.2, J4.4 | P1 | Closed |
 | — | No credential journey — nothing told you a key was missing | J2 | P0 | Closed |
 | — | A long run gave no progress feedback | J10.7 | P1 | Closed |
+| — | Judge quotes were stored but never verified | J11.3 | P2 | Closed |
+| — | Rubrics were a fixed single dimension | J6.6 | P2 | Closed |
+| — | Empty case inputs, no interface grounding | J6.7, J5.3 | P3 | Closed |
 
 ## Keeping this document true
 

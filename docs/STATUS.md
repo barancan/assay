@@ -4,7 +4,7 @@ What is actually built, what is partial, and what is still planned. This file is
 source of truth for capability claims. If the README, the design doc, or a docstring
 disagrees with this page, this page is right and the other is a bug.
 
-**Last verified:** 2026-08-04 against `claude/real-judging-and-grounding`. 333 tests passing, with zero API keys set.
+**Last verified:** 2026-08-04 against `claude/real-judging-and-grounding`. 471 tests passing, with zero API keys set.
 
 | Marker | Meaning |
 |---|---|
@@ -13,9 +13,11 @@ disagrees with this page, this page is right and the other is a bug.
 | **Planned** | Designed, not implemented |
 
 > **The headline:** the *runner* — execute, review, adjudicate, approve, audit — is
-> production-shaped. The *builder* — requirements → intents → checks — now calls a real
-> model on every path, but LLM codegen does not exist and case inputs are still empty.
-> Assay is not yet market-ready; see [Roadmap](#roadmap) for the phases that close the gap.
+> production-shaped. The *builder* now calls a real model on every path, grounds on the
+> target's interface, and emits cases with real inputs and judges with verified evidence.
+> **LLM codegen still does not exist**, so an intent routed to `generated` produces a
+> spec entry with no source behind it — the one remaining piece of the product's core
+> claim. See [Roadmap](#roadmap).
 
 ## Builder (requirements → pipeline)
 
@@ -26,10 +28,10 @@ disagrees with this page, this page is right and the other is a bug.
 | Route deterministic vs. judge | **Partial** | Decided inside the single intent call; no rationale is persisted, no per-intent override |
 | Bind to a template check | **Built** | 11 primitives (`checks/library.py`) |
 | Generate a Python check (codegen) | **Planned** | `generator/build.py:144` hardcodes `generated_sources = {}`. A `generated` intent produces a spec pointing at a file that is never written |
-| Generate a judge rubric | **Built** | `generator/rubricgen.py` asks the builder model for ≥2 anchored dimensions (0/1/2 levels describing observable properties), plus `min_score`, `require_evidence`, `samples` and the verdict `output_schema`. Output is validated — slug-safe unique ids, complete scales, `min_score` in range — then repaired once, then falls back to the deterministic `fallback_rubric` (also the `--offline` path). `/pipelines/generate` still calls `rubric_for()` without a model, so the web wizard gets the fallback until that call passes one |
-| Generate test cases | **Planned** | Every case is `"input": {}` (`generator/build.py:98`) |
-| Ground on the target interface | **Partial** | `generator/interface.py` parses Postman collections, OpenAPI 3 (JSON or YAML, local `$ref`s resolved) and MCP tool schemas into request fields, a response schema and JSONPath response paths, and `sample_response` renders a schema-valid sample for codegen to dry-run against. Detection is by content, and anything unreadable stays ungrounded instead of raising. Not yet consumed by case generation or codegen |
-| Golden dataset binding | **Planned** | `datasets/` is scaffolded by `cli.py:25` and never read |
+| Generate a judge rubric | **Built** | `generator/rubricgen.py` asks the builder model for ≥2 anchored dimensions (0/1/2 levels describing observable properties), plus `min_score`, `require_evidence`, `samples` and the verdict `output_schema`. Output is validated — slug-safe unique ids, complete scales, `min_score` in range — then repaired once, then falls back to the deterministic `fallback_rubric` (also the `--offline` path). The web wizard and the CLI both hand it the configured builder model, so neither is quietly weaker than the other |
+| Generate test cases | **Built** | `generator/casegen.py` produces concrete inputs per intent, grounded on the interface's real request fields, with nominal, empty, boundary and hostile variants. Ids are validated rather than sanitised, and a single gate in `build.py` means no path can emit a case with an empty input |
+| Ground on the target interface | **Built** | `generator/interface.py` parses Postman, OpenAPI 3 (JSON or YAML, local `$ref`s resolved) and MCP tool schemas into request fields, a response schema and JSONPath response paths; `adapters/rest.py` uses the same reader so adapter and builder cannot drift. Case generation consumes it. Detection is by content, not extension. An unreadable *document* stays ungrounded; a path the user explicitly supplied that does not exist is an error. Codegen will consume `sample_response` when it lands (P4) |
+| Golden dataset binding | **Built** | `assay generate --dataset` binds cases to a `datasets/*.jsonl` file instead of generating them; malformed rows name file and line. `assay init` scaffolds an example so the format is discoverable |
 | Regenerate a single check | **Partial** | Emits a contract-correct scaffold that fails explicitly until codegen lands |
 
 ## Target adapters
@@ -50,7 +52,7 @@ disagrees with this page, this page is right and the other is a bug.
 |---|---|---|
 | Rubric-driven scoring, temperature 0 | **Built** | |
 | Rubrics resolve for DB pipelines | **Built** | Fixed 2026-08-04; previously aborted the run with `FileNotFoundError` |
-| Structured output (schema-forced) | **Planned** | `schema=`/`tools=` are accepted by `complete()` and ignored by every adapter |
+| Structured output (schema-forced) | **Built** | Forced natively per provider: Anthropic via a required `emit_verdict` tool, openai_compat via `json_schema` (retrying as `json_object` on a 400), Ollama via `format`. Validated with `jsonschema`; a reply that does not conform is an error, never unvalidated data passed downstream |
 | Evidence enforcement | **Built** | With `require_evidence: true`, a verdict with no quotes — or with a quote that does not appear in the response — fails and says so. Matching folds case, whitespace and typographic look-alikes, and honours `...` elision, so only fabrication fails |
 | Self-consistency (n>1) | **Built** | `samples:` on the rubric (or `samples=` on `run_judge_check`) takes the median score per dimension across N temperature-0 calls and records the per-dimension spread under `evidence.consistency` |
 | Missing dimension scores | **Built** | An unscored dimension fails by name instead of silently reading 0 |
@@ -116,7 +118,7 @@ disagrees with this page, this page is right and the other is a bug.
 | Markdown | **Built** | |
 | HTML | **Partial** | The Markdown escaped inside a `<pre>`, not a styled document |
 | PDF | **Planned** | |
-| Requirement coverage matrix | **Partial** | One-directional (pass counts by `requirement_ref`). Uncovered requirements and orphan tests are never computed |
+| Requirement coverage matrix | **Built** | Both directions: pass counts per requirement, requirements with no test at all, and orphan tests citing a requirement that no longer exists. Needs the requirement list, which DB pipelines store; a file-based run says so rather than implying full coverage |
 
 ## CLI
 
