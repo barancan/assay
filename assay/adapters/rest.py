@@ -1,4 +1,8 @@
-"""Generic REST target with optional Postman-collection / OpenAPI import."""
+"""Generic REST target with optional Postman-collection import.
+
+OpenAPI import is designed but not implemented -- `import_` is parsed as JSON, so an
+OpenAPI YAML file raises. See docs/STATUS.md.
+"""
 from __future__ import annotations
 import json
 import re

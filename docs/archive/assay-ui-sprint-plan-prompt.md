@@ -1,4 +1,24 @@
-# Assay UI Sprint Plan
+# Assay UI Sprint Plan (ARCHIVED)
+
+> **This document is archived and is no longer accurate. Do not plan from it.**
+>
+> It described a UI sprint whose Phases 4–6 were only partly delivered, and several of
+> its "locked design decisions" were deliberately reversed during implementation:
+>
+> - It says the nav is *Projects · Runs · Reports · Settings* with **no Pipelines tab**,
+>   and that `/pipelines` redirects to `/projects`. Both were reversed — the nav has a
+>   Pipelines tab and `/pipelines` renders a list.
+> - **Phase 4** (review and activate) shipped essentially as written.
+> - **Phase 5** (run history, pass-rate trend, regression flag, `runs.html`,
+>   `chart-init.js`) was **never built**; that branch shipped determinism
+>   classification instead.
+> - **Phase 6** (account management, Linear integration UI, shared empty-state partial)
+>   was **not built**; that branch shipped the metric catalogue and threshold scoring.
+>
+> Kept for history only. For current state see [`../STATUS.md`](../STATUS.md); for the
+> flows it was trying to describe see [`../user-journeys.md`](../user-journeys.md).
+
+---
 
 > **Living document.** Updated to reflect design decisions made during implementation.
 > Phases 0–3 are complete. This document governs Phases 4–6.
