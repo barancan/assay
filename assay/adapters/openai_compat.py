@@ -68,11 +68,13 @@ class OpenAICompatAdapter:
 
     def invoke(self, req: ModelRequest) -> ModelResponse:
         # Raises LLMConfigError naming the variable rather than sending an empty bearer.
+        # key_env="" means a keyless local server, so no Authorization header at all.
         key = read_key(self.name, self.key_env)
+        headers = {"Authorization": f"Bearer {key}"} if key else {}
         params = {**self.params, **req.params}
         t0 = time.perf_counter()
         r = requests.post(f"{self.endpoint}/chat/completions",
-                          headers={"Authorization": f"Bearer {key}"},
+                          headers=headers,
                           json={"model": self.model, "messages": self._messages(req),
                                 "temperature": params.get("temperature", 0.0)},
                           timeout=params.get("timeout", 60))

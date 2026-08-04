@@ -151,3 +151,50 @@ def test_every_registered_judge_adapter_has_a_key_env_entry():
         assert name in DEFAULT_KEY_ENV, (
             f"judge adapter '{name}' has no DEFAULT_KEY_ENV entry"
         )
+
+
+# ── keyless local endpoints ─────────────────────────────────────────────────
+
+def test_empty_key_env_means_no_credential():
+    """An explicit "" opts a local OpenAI-compatible server out of auth entirely."""
+    assert key_env_for("openai_compat", "") is None
+    status = credential_status("openai_compat", "")
+    assert status["requires_key"] is False
+    assert status["configured"] is True
+
+
+def test_empty_key_env_reaches_the_adapter(monkeypatch):
+    """The "" must survive resolution -- dropping it silently restores the default."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    provider = resolve_llm("openai_compat", "local-model", key_env="")
+    assert provider.key_env == ""
+    assert provider.describe()["key_env"] is None
+
+
+def test_keyless_local_endpoint_sends_no_auth_header(monkeypatch):
+    """A local vLLM must not be forced to invent an API key."""
+    import assay.adapters.openai_compat as oc
+    from assay.adapters.base import ModelRequest
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    captured = {}
+
+    class _Resp:
+        ok = True
+
+        def json(self):
+            return {"choices": [{"message": {"content": "hi"}}], "usage": {}}
+
+    def _fake_post(url, headers=None, json=None, timeout=None):
+        captured["headers"] = headers
+        return _Resp()
+
+    monkeypatch.setattr(oc.requests, "post", _fake_post)
+    adapter = oc.OpenAICompatAdapter(model="local-model",
+                                     endpoint="http://localhost:8000/v1", key_env="")
+    adapter.invoke(ModelRequest(input={"prompt": "hi"}))
+    assert "Authorization" not in captured["headers"]
+
+
+def test_none_key_env_still_uses_the_adapter_default():
+    assert key_env_for("openai_compat", None) == "OPENAI_API_KEY"

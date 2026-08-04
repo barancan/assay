@@ -53,9 +53,13 @@ def key_env_for(adapter: str, key_env: str | None = None) -> str | None:
 
     An explicit `key_env` always wins, so a spec can point a second OpenAI-compatible
     target at a different key than the workspace default.
+
+    An explicit empty string means "this target takes no credential" -- the escape
+    hatch for a local OpenAI-compatible server (vLLM, LM Studio, llama.cpp) that
+    would otherwise be forced to invent an API key it does not want.
     """
-    if key_env:
-        return key_env
+    if key_env is not None:
+        return key_env or None
     return DEFAULT_KEY_ENV.get(adapter)
 
 

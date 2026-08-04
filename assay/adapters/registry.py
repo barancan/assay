@@ -36,7 +36,9 @@ def get_judge_provider(judge: JudgeSpec) -> Any:
     # second key; they used to be declared and dropped on the floor here.
     kwargs = {"model": judge.model, "endpoint": judge.endpoint,
               "key_env": judge.key_env, "params": judge.params}
-    return cls(**{k: v for k, v in kwargs.items() if v})
+    # `is not None`, not truthiness: key_env="" is meaningful -- it opts a keyless
+    # local server out of auth, and dropping it would silently restore the default.
+    return cls(**{k: v for k, v in kwargs.items() if v is not None})
 
 
 def test_connection(adapter: Any) -> None:
