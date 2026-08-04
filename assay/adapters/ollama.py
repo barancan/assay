@@ -4,6 +4,7 @@ import json
 import time
 import requests
 from ..llm.provider import key_env_for
+from ..pricing import estimate_cost, normalise_usage
 from .base import ModelRequest, ModelResponse, parse_structured
 
 
@@ -66,14 +67,23 @@ class OllamaAdapter:
         if mode:
             raw["_assay_structured_mode"] = mode
         text = raw.get("response")
+        # ollama reports token counts inline on the generate response rather than in a
+        # usage object. Local inference is genuinely free, so cost is 0.0 and not None --
+        # tokens are still counted, because "how much did this run chew through" is a
+        # question worth answering even when the answer costs nothing.
+        usage = normalise_usage(self.name, raw)
+        cost = estimate_cost(self.name, self.model, raw)
         if not schema:
             return ModelResponse(text=text, raw=raw, json=_maybe_json(text or ""),
-                                 latency_ms=latency, status="ok" if r.ok else "error")
+                                 latency_ms=latency, usage=usage, cost_usd=cost,
+                                 status="ok" if r.ok else "error")
         if not r.ok:
-            return ModelResponse(text=text, raw=raw, latency_ms=latency, status="error",
+            return ModelResponse(text=text, raw=raw, latency_ms=latency, usage=usage,
+                                 cost_usd=cost, status="error",
                                  error=f"ollama request failed (HTTP {r.status_code})")
         parsed, err = parse_structured(text, schema, provider="ollama")
         return ModelResponse(text=text, raw=raw, json=parsed, latency_ms=latency,
+                             usage=usage, cost_usd=cost,
                              status="error" if err else "ok", error=err)
 
     def complete(self, messages, *, schema=None, tools=None, params=None) -> ModelResponse:

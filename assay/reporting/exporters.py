@@ -48,10 +48,41 @@ def _gather(run_id: int) -> dict:
             "cases": [{"suite": r.suite_id, "case": r.case_id,
                        "requirement_ref": r.requirement_ref, "passed": r.passed,
                        "latency_ms": r.latency_ms, "checks": r.checks,
+                       "input_tokens": r.input_tokens, "output_tokens": r.output_tokens,
+                       "judge_tokens": r.judge_tokens, "cost_usd": r.cost_usd,
                        "response": r.response} for r in results],
         }
+        data["spend"] = spend(data)
         report_pk = report.id
     return data, report_pk
+
+
+def spend(data: dict) -> dict:
+    """Token and dollar totals for a run, and how much of it is unaccounted for.
+
+    `unknown_cases` is the honest part: `total_usd` only covers cases we could price,
+    so a report that reads "$0.31" while three cases went unpriced has to say so
+    instead of presenting a partial figure as the bill.
+    """
+    cases = data.get("cases") or []
+    priced = [c for c in cases if c.get("cost_usd") is not None]
+    unknown = [c for c in cases if c.get("cost_usd") is None]
+    return {
+        "total_usd": round(sum(c["cost_usd"] for c in priced), 10),
+        "input_tokens": sum(int(c.get("input_tokens") or 0) for c in cases),
+        "output_tokens": sum(int(c.get("output_tokens") or 0) for c in cases),
+        "judge_tokens": sum(int(c.get("judge_tokens") or 0) for c in cases),
+        "unknown_cases": len(unknown),
+        "priced_cases": len(priced),
+        # True only when every case carries a price, so a reader knows whether
+        # total_usd is the bill or a lower bound on it.
+        "complete": not unknown,
+    }
+
+
+def money(value: float | None) -> str:
+    """Dollars, or the word unknown. Never renders a missing price as $0.0000."""
+    return "unknown" if value is None else f"${value:.4f}"
 
 
 def _coverage(data: dict) -> dict:
@@ -152,17 +183,41 @@ def _md(data: dict) -> str:
              f"{data['target']['model'] or ''} {data['target']['endpoint'] or ''}".strip(),
              f"- **Spec hash:** `{data['spec_hash']}`  •  **Commit:** `{data['git_commit'] or '—'}`",
              f"- **Trigger:** {data['trigger']} by {data['triggered_by']}",
-             f"- **Summary:** {data['summary']}  •  **Cost:** ${data['cost_usd']:.4f}", ""]
+             f"- **Summary:** {data['summary']}", ""]
+    lines += _spend_lines(data)
     lines += _coverage_lines(data)
     lines += ["## Cases", ""]
     for c in data["cases"]:
         flag = "PASS" if c["passed"] else "FAIL"
         lines.append(f"### [{flag}] {c['suite']} / {c['case']}  ({c['latency_ms']:.0f} ms)")
+        lines.append(f"  - Spend: {money(c.get('cost_usd'))} — "
+                     f"{_tokens(c.get('input_tokens'))} in / "
+                     f"{_tokens(c.get('output_tokens'))} out / "
+                     f"{_tokens(c.get('judge_tokens'))} judge tokens")
         for chk in c["checks"]:
             mark = "ok" if chk["passed"] else "X"
             lines.append(f"  - [{mark}] {chk['check_id']}: {chk['message']}")
         lines.append("")
     return "\n".join(lines)
+
+
+def _tokens(value) -> str:
+    return "unknown" if value is None else str(int(value))
+
+
+def _spend_lines(data: dict) -> list[str]:
+    s = data.get("spend") or spend(data)
+    lines = ["## Spend", "",
+             f"- **Total:** {money(s['total_usd'])}"
+             + ("" if s["complete"] else "  (lower bound)"),
+             f"- **Tokens:** {s['input_tokens']} in / {s['output_tokens']} out / "
+             f"{s['judge_tokens']} judge"]
+    if not s["complete"]:
+        # Naming the count stops the total reading as the whole bill.
+        lines.append(f"- **{s['unknown_cases']} of {len(data['cases'])} case(s) could not "
+                     "be priced** — the model is not in the price table. Set "
+                     "ASSAY_PRICING_FILE to add it.")
+    return lines + [""]
 
 
 def _html(data: dict) -> str:
