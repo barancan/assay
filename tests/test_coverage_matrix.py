@@ -152,3 +152,64 @@ def test_export_reads_requirements_from_the_pipeline_version(_tmp_db):
     assert [r["id"] for r in data["requirements"]] == ["R1", "R2"]
     cov = coverage(data)
     assert cov["uncovered"] == ["R2"], "the untested requirement must surface"
+
+
+# ── run provenance ──────────────────────────────────────────────────────────
+
+def test_run_records_the_interface_hash(_tmp_db, tmp_path):
+    """A report must be able to say what interface it was tested against."""
+    import json
+    from assay.engine import execute_run
+    from assay.pipeline import create_pipeline, create_version, activate_version
+    from assay.store.db import session_scope
+    from assay.store.models import Run, TargetModel, User
+
+    collection = tmp_path / "c.postman_collection.json"
+    collection.write_text(json.dumps({
+        "info": {"name": "c"},
+        "item": [{"name": "a", "request": {
+            "method": "POST", "url": {"raw": "https://x/a"},
+            "body": {"mode": "raw", "raw": json.dumps({"text": "x"})}}}],
+    }))
+
+    with session_scope() as s:
+        s.add(User(name="alice", role="reviewer"))
+    config = {
+        "version": 1, "project": "iface", "judges": {}, "gating": {},
+        "target": {"adapter": "mock", "import": str(collection)},
+        "suites": [{"id": "R1", "requirement_ref": "R1", "cases": [
+            {"id": "c1", "input": {"prompt": "hi"},
+             "checks": [{"type": "template", "uses": "valid_json"}]}]}],
+    }
+    pipe = create_pipeline(project="iface", name="iface")
+    version = create_version(pipe.id, config, {}, {})
+    activate_version(version.id, "alice")
+
+    run_id = execute_run(pipeline_version_id=version.id)
+    with session_scope() as s:
+        run = s.get(Run, run_id)
+        assert s.get(TargetModel, run.target_id).interface_hash
+
+
+def test_no_interface_leaves_the_hash_null(_tmp_db):
+    from assay.engine import execute_run
+    from assay.pipeline import create_pipeline, create_version, activate_version
+    from assay.store.db import session_scope
+    from assay.store.models import Run, TargetModel, User
+
+    with session_scope() as s:
+        s.add(User(name="alice", role="reviewer"))
+    config = {
+        "version": 1, "project": "noiface", "judges": {}, "gating": {},
+        "target": {"adapter": "mock"},
+        "suites": [{"id": "R1", "requirement_ref": "R1", "cases": [
+            {"id": "c1", "input": {}, "checks": [{"type": "template", "uses": "valid_json"}]}]}],
+    }
+    pipe = create_pipeline(project="noiface", name="noiface")
+    version = create_version(pipe.id, config, {}, {})
+    activate_version(version.id, "alice")
+
+    run_id = execute_run(pipeline_version_id=version.id)
+    with session_scope() as s:
+        run = s.get(Run, run_id)
+        assert s.get(TargetModel, run.target_id).interface_hash is None

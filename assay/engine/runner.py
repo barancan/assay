@@ -28,6 +28,23 @@ def _git_commit() -> str | None:
         return None
 
 
+def _interface_hash(spec: Spec) -> str | None:
+    """Hash of the target's interface description, so a run records what it tested against.
+
+    The column has existed since the first schema and was never populated, which meant a
+    report could not tell you whether the interface had changed underneath it.
+    """
+    path = getattr(spec.target, "import_", None)
+    if not path:
+        return None
+    try:
+        from ..generator.interface import parse_interface
+        return parse_interface(path).hash or None
+    except Exception:
+        # Provenance is worth recording but never worth failing a run over.
+        return None
+
+
 def _resolve_spec(
     spec: Spec | None,
     pipeline_version_id: int | None,
@@ -153,7 +170,8 @@ def _setup_run(
         with session_scope() as s:
             tm = TargetModel(project=spec.project, adapter=spec.target.adapter,
                              model=spec.target.model, endpoint=spec.target.endpoint,
-                             params=spec.target.params)
+                             params=spec.target.params,
+                             interface_hash=_interface_hash(spec))
             s.add(tm)
             s.flush()
             run = Run(project=spec.project, spec_hash=spec_hash(spec),
