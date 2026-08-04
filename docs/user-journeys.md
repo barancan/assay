@@ -55,7 +55,7 @@ Journeys are numbered `J1…J12`; failure branches are lettered (`J6-F1`).
 |---|---|---|---|---|---|---|
 | 1 | Open the app | Reports queue (`queue.html`) | `GET /` | `server/app.py:141` | — | **BUILT** |
 | 2 | See an empty state that names the next step | inline empty state, `queue.html:95` | — | — | — | **PARTIAL** — six duplicated hand-rolled empty states, no shared partial; the zero-state CTA points at reports rather than "create a project" |
-| 3 | See whether a model provider is configured | global banner | — | `llm.provider.credential_status` | — | **MISSING** — no credential surface exists anywhere (P0) |
+| 3 | See whether a model provider is configured | global banner | — | `llm.provider.credential_status` | — | **PARTIAL** — Settings > Providers reports it; there is still no zero-state banner on the landing screen |
 
 **Gap:** the landing screen is a report queue, which on day one is empty and meaningless.
 Target: zero state routes into [J3](#j3--create-a-project) and surfaces
@@ -75,9 +75,9 @@ Target: zero state routes into [J3](#j3--create-a-project) and surfaces
 |---|---|---|---|---|---|---|
 | 1 | Open Settings | `settings.html` | `GET /settings` | `server/app.py:446` | — | **BUILT** |
 | 2 | Pick default judge adapter + model | `model_selector` macro, `settings.html:11-53` | `POST /settings/judge` | `server/app.py:480` | `WorkspaceSetting` `judge_adapter` / `judge_model` | **BUILT** |
-| 3 | See per-provider credential status — e.g. "`ANTHROPIC_API_KEY` not set" | Settings → Providers card | `GET /settings/judge` | `llm.provider.credential_status` | — | **MISSING** (P0) |
-| 4 | Set the **builder** model separately from the judge model | Settings → Providers card | `POST /settings/builder` | `llm.provider.resolve_builder_llm` | `WorkspaceSetting` | **MISSING** (P0/P1) — the stored judge setting is used only at eval time, never for building |
-| 5 | Name a per-target key env var | wizard step 2 `key_env` field, `_adapter_fields.html:36` | `POST /pipelines/generate` | `TargetSpec.key_env` | persisted in `PipelineVersion.config.target` | **MISSING** — the field is collected (`server/app.py:307`) and silently dropped: `TargetSpec` (`spec/models.py:7-17`) has no such field and pydantic ignores extras, while `adapters/openai_compat.py:44` hardcodes `OPENAI_API_KEY` (P0) |
+| 3 | See per-provider credential status — e.g. "`ANTHROPIC_API_KEY` not set" | Settings → Providers card | `GET /settings/builder` | `llm.provider.credential_overview` | — | **BUILT** — env var name plus a configured/not-configured badge per adapter. Names only, never values |
+| 4 | Set the **builder** model separately from the judge model | Settings → Providers card | `POST /settings/builder` | `llm.provider.builder_choice` | `WorkspaceSetting` `builder_adapter` / `builder_model` | **BUILT** — falls back to the judge setting, then to a built-in default, resolved at read time |
+| 5 | Name a per-target key env var | wizard step 2 `key_env` field, `_adapter_fields.html:36` | `POST /pipelines/generate` | `TargetSpec.key_env` → `llm.provider.read_key` | persisted in `PipelineVersion.config.target` | **BUILT** — the name reaches the adapter and the value is read from the environment at client-construction time. `key_env: ""` means the target takes no credential. The spec models are now `extra="forbid"`, so the next dropped field is a loud validation error rather than silent loss |
 
 **J2-F1 — no key set, builder clicks Generate.** Returns HTTP 422 naming the exact env var,
 rendered in the step-2 `.banner-danger` next to the fields that need fixing. The wizard stays
@@ -117,12 +117,12 @@ in an exported report.
 | # | Action | UI touchpoint | Route | Business logic | State effect | Status |
 |---|---|---|---|---|---|---|
 | 1 | Choose adapter + model | `_adapter_fields.html`, `model_selector` | — | `_ADAPTER_NAMES`, `server/app.py:261` | — | **PARTIAL** — `mock` is offered as an ordinary choice; it must become test-only (P6) |
-| 2 | Test the connection | "Test connection", `pipeline_new.html:227` | `POST /connection-test` | `engine.connection.test_connection:14` | — | **BUILT** — returns a live pass/fail badge with latency |
+| 2 | Test the connection | "Test connection", `pipeline_new.html:227` | `POST /connection-test` | `engine.connection.test_connection` | — | **BUILT** — a live badge with latency that now distinguishes unreachable from unauthenticated, naming the missing variable instead of showing a green "Connected" with no key |
 | 3 | Upload the interface file (Postman / OpenAPI / MCP) | step-2 file field | `POST /pipelines/generate` | `generator.ingest.parse_interface` | `TargetModel.interface_hash` | **MISSING** — no upload control, and the interface is never parsed at build time, so generated checks cannot reference real response fields (P3) |
 | 4 | Point at a golden dataset | step-2 dataset field | — | `generator.casegen.load_dataset` | — | **MISSING** — `datasets/` is scaffolded by `cli.py:25` and never read (P3) |
 
 **J5-F1 — endpoint unreachable:** the badge shows the error. **BUILT.**
-**J5-F2 — reachable but unauthorised (401):** must name the missing key env var (P0).
+**J5-F2 — reachable but unauthorised (401):** names the missing key env var. **BUILT.**
 
 ---
 
@@ -228,20 +228,26 @@ wizard (P0/P7).
 
 ## Ranked gaps
 
-Ordered by what most blocks a credible market-ready claim.
+Ordered by what most blocks a credible market-ready claim. Closed items are struck from
+the list as their journey steps flip to BUILT; the roadmap phase that closed each one is
+named so this table stays auditable.
 
-| # | Gap | Journey | Phase |
-|---|---|---|---|
-| 1 | Judge rubrics never materialised — breaks every run containing a judge check | J10.5 | P2 |
-| 2 | "Regenerate" writes broken code behind a live button | J8.3 | P4 |
-| 3 | The UI never calls an LLM — the builder promise is unmet on the primary surface | J6.2, J4.4 | P1 |
-| 4 | No codegen — the stated differentiator does not exist | J6.5 | P4 |
-| 5 | No credential journey — nothing tells you a key is missing | J2 | P0 |
-| 6 | Sandbox locks down after module load — the security claim is false | J10.4 | P4 |
-| 7 | Empty cases, no interface grounding | J6.7, J5.3 | P3 |
-| 8 | No run history, trends, or regression detection | J12.3-5 | post-P6 |
-| 9 | No spec export — the eval-as-code thesis is unreachable from the UI | J12.7 | post-P6 |
-| 10 | Zero state and no Project entity | J1, J3 | UI polish |
+| # | Gap | Journey | Phase | State |
+|---|---|---|---|---|
+| 1 | No codegen — the stated differentiator does not exist | J6.5 | P4 | **Open** |
+| 2 | Empty cases, no interface grounding — generated checks cannot reference real fields | J6.7, J5.3 | P3 | **Open** |
+| 3 | Judge rubrics are a fixed single dimension, and evidence quotes are never verified | J6.6, J11.3 | P2 | **Open** |
+| 4 | No token or cost capture, so a real-model run reports zero spend | J10.6 | P5 | **Open** |
+| 5 | Mock adapters are still selectable as ordinary targets | J5.1 | P6 | **Open** |
+| 6 | No run history, trends, or regression detection | J12.3-5 | post-P6 | **Open** |
+| 7 | No spec export — the eval-as-code thesis is unreachable from the UI | J12.7 | post-P6 | **Open** |
+| 8 | Zero state and no Project entity | J1, J3 | UI polish | **Open** |
+| — | Judge rubrics never materialised — broke every run containing a judge check | J10.5 | hotfix | Closed |
+| — | "Regenerate" wrote code the sandbox could never load | J8.3 | hotfix | Closed |
+| — | Sandbox locked down after module load — the containment claim was false | J10.4 | hotfix | Closed |
+| — | The UI never called an LLM — the builder promise was unmet on the primary surface | J6.2, J4.4 | P1 | Closed |
+| — | No credential journey — nothing told you a key was missing | J2 | P0 | Closed |
+| — | A long run gave no progress feedback | J10.7 | P1 | Closed |
 
 ## Keeping this document true
 

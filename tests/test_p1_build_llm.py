@@ -282,3 +282,33 @@ def test_wizard_stays_on_step_2_when_generate_fails():
     generate = html.split("async generate()", 1)[1].split("async saveCheckParams", 1)[0]
     assert generate.index("this.buildError = await this.errorText(r); return;") < \
         generate.index("this.step = 3")
+
+
+# ── preview is a spend vector ───────────────────────────────────────────────
+
+def test_preview_requires_identity_in_enforced_mode(monkeypatch, tmp_path):
+    """Preview calls a real model, so it must not be an open spend vector."""
+    monkeypatch.setenv("ASSAY_AUTH", "enforced")
+    monkeypatch.setenv("ASSAY_SECRET_KEY", "test-secret-not-the-dev-default")
+    import importlib, assay.config
+    importlib.reload(assay.config)
+
+    from fastapi.testclient import TestClient
+    from assay.server.app import app
+
+    resp = TestClient(app).post("/pipelines/preview", json={"requirements": "Be fast."})
+    assert resp.status_code == 401
+
+
+def test_preview_still_open_in_open_mode(builder_llm, monkeypatch):
+    monkeypatch.setenv("ASSAY_AUTH", "open")
+    import importlib, assay.config
+    importlib.reload(assay.config)
+
+    from fastapi.testclient import TestClient
+    from assay.server.app import app
+
+    resp = TestClient(app).post("/pipelines/preview",
+                                json={"requirements": "Responses must be valid JSON."})
+    assert resp.status_code == 200
+    assert resp.json()["checks"]

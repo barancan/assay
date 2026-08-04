@@ -381,7 +381,15 @@ def _llm_config_detail(e) -> str:
 
 
 @app.post("/pipelines/preview")
-def pipeline_preview(body: PreviewBody):
+def pipeline_preview(
+    body: PreviewBody,
+    request: Request,
+    x_assay_user: str | None = Header(default=None),
+):
+    # Preview now calls a real model, so every request costs tokens. Unauthenticated
+    # it would be an open spend vector for anyone who can reach the port. Open mode is
+    # unaffected -- this only bites in enforced mode, which is the deployed posture.
+    _require_identity(request, x_assay_user)
     intents = _derive_intents_or_422(body.requirements)
     checks = [
         {

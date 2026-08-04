@@ -4,7 +4,7 @@ What is actually built, what is partial, and what is still planned. This file is
 source of truth for capability claims. If the README, the design doc, or a docstring
 disagrees with this page, this page is right and the other is a bug.
 
-**Last verified:** 2026-08-04 against `main`. 162 tests passing.
+**Last verified:** 2026-08-04 against `claude/real-llm-foundation`. 273 tests passing, with zero API keys set.
 
 | Marker | Meaning |
 |---|---|
@@ -39,7 +39,7 @@ disagrees with this page, this page is right and the other is a bug.
 | `mock` | **Built** | For tests and the offline example only |
 | `rest` | **Partial** | Postman collection import, variable substitution, bearer auth. **OpenAPI import is not implemented** — an OpenAPI file fails in `json.loads` (`adapters/rest.py:37`) |
 | `anthropic` | **Built** | |
-| `openai_compat` | **Partial** | Works, but the API key env var is hardcoded to `OPENAI_API_KEY` (`adapters/openai_compat.py:44`); per-target `key_env` is ignored |
+| `openai_compat` | **Built** | Honours a per-target `key_env`; `key_env: ""` opts a keyless local server (vLLM, LM Studio) out of auth entirely |
 | `ollama` | **Built** | |
 | `mcp` | **Planned** | Not implemented |
 | `custom` | **Planned** | Not implemented; the adapter registry is a closed dict (`adapters/registry.py:11-18`) |
@@ -102,7 +102,7 @@ disagrees with this page, this page is right and the other is a bug.
 | Pipeline review screen with activation gate | **Built** | |
 | Per-check params editing, inline source editing | **Built** | Draft versions only; 409 on active |
 | Determinism classification, metric catalogue + thresholds | **Built** | |
-| Provider credential status | **Planned** | Nothing in the UI reports a missing API key |
+| Provider credential status | **Built** | Settings > Providers lists each adapter's env var and whether it is set. Names only, never values |
 | Run history, pass-rate trend, regression banner | **Planned** | |
 | Account management from Settings | **Planned** | The accounts table is read-only |
 | Linear integration UI | **Planned** | The notification backend exists; there is no UI |
