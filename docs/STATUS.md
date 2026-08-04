@@ -26,7 +26,7 @@ disagrees with this page, this page is right and the other is a bug.
 | Route deterministic vs. judge | **Partial** | Decided inside the single intent call; no rationale is persisted, no per-intent override |
 | Bind to a template check | **Built** | 11 primitives (`checks/library.py`) |
 | Generate a Python check (codegen) | **Planned** | `generator/build.py:144` hardcodes `generated_sources = {}`. A `generated` intent produces a spec pointing at a file that is never written |
-| Generate a judge rubric | **Partial** | A fixed one-dimension YAML synthesised from the assertion string; no anchored dimensions, no output schema, no evidence requirement |
+| Generate a judge rubric | **Built** | `generator/rubricgen.py` asks the builder model for ≥2 anchored dimensions (0/1/2 levels describing observable properties), plus `min_score`, `require_evidence`, `samples` and the verdict `output_schema`. Output is validated — slug-safe unique ids, complete scales, `min_score` in range — then repaired once, then falls back to the deterministic `fallback_rubric` (also the `--offline` path). `/pipelines/generate` still calls `rubric_for()` without a model, so the web wizard gets the fallback until that call passes one |
 | Generate test cases | **Planned** | Every case is `"input": {}` (`generator/build.py:98`) |
 | Ground on the target interface | **Planned** | The Postman/OpenAPI file is never parsed at build time, so checks cannot reference real response fields |
 | Golden dataset binding | **Planned** | `datasets/` is scaffolded by `cli.py:25` and never read |
@@ -51,8 +51,9 @@ disagrees with this page, this page is right and the other is a bug.
 | Rubric-driven scoring, temperature 0 | **Built** | |
 | Rubrics resolve for DB pipelines | **Built** | Fixed 2026-08-04; previously aborted the run with `FileNotFoundError` |
 | Structured output (schema-forced) | **Planned** | `schema=`/`tools=` are accepted by `complete()` and ignored by every adapter |
-| Evidence enforcement | **Planned** | Quotes are stored but never verified against the response |
-| Self-consistency (n>1) | **Planned** | |
+| Evidence enforcement | **Built** | With `require_evidence: true`, a verdict with no quotes — or with a quote that does not appear in the response — fails and says so. Matching folds case, whitespace and typographic look-alikes, and honours `...` elision, so only fabrication fails |
+| Self-consistency (n>1) | **Built** | `samples:` on the rubric (or `samples=` on `run_judge_check`) takes the median score per dimension across N temperature-0 calls and records the per-dimension spread under `evidence.consistency` |
+| Missing dimension scores | **Built** | An unscored dimension fails by name instead of silently reading 0 |
 
 ## Checks and sandbox
 
