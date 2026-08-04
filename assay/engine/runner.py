@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -296,8 +297,34 @@ def start_run(
             if ctx.tmpdir:
                 shutil.rmtree(ctx.tmpdir, ignore_errors=True)
 
-    threading.Thread(target=_worker, name=f"assay-run-{ctx.run_id}", daemon=True).start()
+    thread = threading.Thread(target=_worker, name=f"assay-run-{ctx.run_id}", daemon=True)
+    _track(thread)
+    thread.start()
     return ctx.run_id
+
+
+# Background runs resolve the session factory from module globals every time they touch
+# the DB, so a run still in flight when the process reconfigures its store will write
+# somewhere unexpected. Keeping handles lets callers wait for quiescence -- which tests
+# need between cases, and a graceful shutdown wants before exiting.
+_RUN_THREADS: list[threading.Thread] = []
+_RUN_THREADS_LOCK = threading.Lock()
+
+
+def _track(thread: threading.Thread) -> None:
+    with _RUN_THREADS_LOCK:
+        _RUN_THREADS[:] = [t for t in _RUN_THREADS if t.is_alive()]
+        _RUN_THREADS.append(thread)
+
+
+def wait_for_runs(timeout: float = 30.0) -> bool:
+    """Block until every background run finishes. True if all completed in time."""
+    with _RUN_THREADS_LOCK:
+        pending = list(_RUN_THREADS)
+    deadline = time.monotonic() + timeout
+    for thread in pending:
+        thread.join(max(0.0, deadline - time.monotonic()))
+    return not any(t.is_alive() for t in pending)
 
 
 def _submit_and_export(run_id: int, actor: str) -> None:
