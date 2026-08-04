@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 from ..llm.provider import LLMConfigError, credential_status, key_env_for, read_key
+from ..pricing import estimate_cost, normalise_usage
 from .base import ModelRequest, ModelResponse, parse_structured
 
 # Anthropic has no response-format switch: the way to force a shape is to declare a
@@ -103,24 +104,31 @@ class AnthropicAdapter:
         tool_calls = [{"id": getattr(b, "id", None), "name": getattr(b, "name", None),
                        "input": getattr(b, "input", None)}
                       for b in blocks if getattr(b, "type", "") == "tool_use"] or None
-        usage = {"input_tokens": msg.usage.input_tokens,
-                 "output_tokens": msg.usage.output_tokens}
+        reported = {"input_tokens": msg.usage.input_tokens,
+                    "output_tokens": msg.usage.output_tokens}
+        # Normalised here so every caller reads one shape; the provider's own payload
+        # survives untouched in `raw`. cost_usd stays None for a model we cannot price.
+        usage = normalise_usage(self.name, reported)
+        cost = estimate_cost(self.name, self.model, reported)
         raw = msg.model_dump()
         if not schema:
             return ModelResponse(text=text, raw=raw, json=_maybe_json(text),
-                                 tool_calls=tool_calls, latency_ms=latency, usage=usage)
+                                 tool_calls=tool_calls, latency_ms=latency, usage=usage,
+                                 cost_usd=cost)
         # Structured mode: the tool input is the answer. Falling back to the text
         # block would defeat the point of forcing the tool in the first place.
         if not tool_calls:
             return ModelResponse(
-                text=text, raw=raw, latency_ms=latency, usage=usage, status="error",
+                text=text, raw=raw, latency_ms=latency, usage=usage, cost_usd=cost,
+                status="error",
                 error="anthropic answered with text, not the forced structured tool call")
         parsed, err = parse_structured(tool_calls[0]["input"], schema, provider="anthropic")
         if err:
             return ModelResponse(text=text, raw=raw, tool_calls=tool_calls, latency_ms=latency,
-                                 usage=usage, status="error", error=err)
+                                 usage=usage, cost_usd=cost, status="error", error=err)
         return ModelResponse(text=text or json.dumps(parsed), raw=raw, json=parsed,
-                             tool_calls=tool_calls, latency_ms=latency, usage=usage)
+                             tool_calls=tool_calls, latency_ms=latency, usage=usage,
+                             cost_usd=cost)
 
     def complete(self, messages, *, schema=None, tools=None, params=None) -> ModelResponse:
         return self.invoke(ModelRequest(input={"messages": messages}, params=params or {},
