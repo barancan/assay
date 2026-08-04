@@ -134,7 +134,7 @@ at the end of `assay run`.
 | Postgres via `ASSAY_DB_URL` | **Partial** | No code change is needed, and migrations are now dialect-aware, but the Postgres path is not exercised in CI |
 | Schema migrations | **Partial** | Hand-rolled additive `ALTER TABLE` via `store/db.py:_add_columns`; no Alembic |
 | Cases as first-class rows | **Planned** | Cases live as JSON inside `PipelineVersion.config` |
-| `TargetModel.interface_hash` | **Planned** | `parse_interface` computes the hash (`Interface.hash`), but nothing writes it onto the row yet |
+| `TargetModel.interface_hash` | **Built** | Written on every run from the target's interface file, so a report records what it was tested against. Null when no interface is supplied |
 
 ## Roadmap
 

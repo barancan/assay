@@ -35,12 +35,9 @@ def _interface_hash(spec: Spec) -> str | None:
     The column has existed since the first schema and was never populated, which meant a
     report could not tell you whether the interface had changed underneath it.
     """
-    path = getattr(spec.target, "import_", None)
-    if not path:
-        return None
     try:
-        from ..generator.interface import parse_interface
-        return parse_interface(path).hash or None
+        from ..generator.interface import interface_from_target
+        return interface_from_target(spec.target).hash or None
     except Exception:
         # Provenance is worth recording but never worth failing a run over.
         return None
