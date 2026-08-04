@@ -137,7 +137,7 @@ The product's core moment. **Success:** a draft version whose checks a builder w
 | 3 | Route each intent → template / generated / judge | — | — | `generator.build.intents_to_spec:81` | `PipelineVersion.config` | **PARTIAL** — routing is a field on the single LLM call; no rationale captured, no per-intent override surface |
 | 4 | Materialise **template** checks | — | — | `checks/library.py:125` | config | **BUILT** — 11 of the design's 16 primitives |
 | 5 | Materialise **generated** checks | — | — | `generator.codegen.generate_check` | `PipelineVersion.generated_sources` | **MISSING** — `generator/build.py:144` hardcodes `generated_sources = {}`, so a `generated` intent produces a spec pointing at a file that is never written and the run dies at `sandbox/runner.py:103` (P4) |
-| 6 | Materialise **judge** rubrics | — | — | `generator.rubricgen.generate_rubric` | `PipelineVersion.rubrics` | **PARTIAL** — a fixed one-dimension YAML synthesised from the assertion string (`generator/build.py:131-142`); no anchors, no output schema, no evidence requirement (P2) |
+| 6 | Materialise **judge** rubrics | — | — | `generator.rubricgen.generate_rubric` | `PipelineVersion.rubrics` | **BUILT** — an LLM-authored rubric with at least two anchored dimensions, each anchor observable rather than a grading word, plus `min_score`, `require_evidence` and the verdict schema. Invalid output is repaired once, then falls back to a deterministic rubric that clears the same validator |
 | 7 | Generate concrete test cases | — | — | `generator.casegen.generate_cases` | config | **MISSING** — every case is `"input": {}` (`generator/build.py:98`) (P3) |
 | 8 | Auto-activate and land on Review | step 3 / `HX-Redirect` | — | `pipeline.service.activate_version:164` | version `status=active` | **BUILT** |
 
@@ -204,7 +204,7 @@ wizard (P0/P7).
 |---|---|---|---|---|---|---|
 | 1 | Read the report | `report_detail.html` | `GET /reports/{id}/view` | `server/app.py:1062` | — | **BUILT** |
 | 2 | Open a failing case transcript | `_transcript.html` (htmx) | `GET …/cases/{cid}/transcript` | `server/app.py:1181` | — | **BUILT** |
-| 3 | See *why* a check failed — evidence and quotes | verdict block | — | `judges/judge.py` evidence | — | **PARTIAL** — evidence is stored but never enforced; judge quotes are unverified against the response (P2) |
+| 3 | See *why* a check failed — evidence and quotes | verdict block | — | `judges.judge.run_judge_check` | — | **BUILT** — with `require_evidence`, quotes are verified against the response: a fabricated quote fails the check, and re-cased or re-wrapped spans still pass. Verified and unverified quotes are recorded separately, and a self-consistency spread is stored when the rubric asks for multiple samples |
 | 4 | Assign a reviewer | `report_detail.html:68` | `POST /reports/{id}/assign` | `engine.review.assign_reviewer:174` | `Report.reviewer` | **BUILT** |
 | 5 | Export the report | `report_detail.html:43-49` | `GET /reports/{id}/export/{fmt}` | `reporting.exporters.export_report:79` | — | **PARTIAL** — JSON/MD/HTML only; the "HTML" export is Markdown escaped inside a `<pre>`; no PDF |
 | 6 | Hand off — reviewer adjudicates and approves | *(crosses into the reviewer journey)* | `POST …/adjudicate`, `POST …/approve` | `engine.review.adjudicate_case:192`, `approve_report:169` | `state=done`, report locked, approver recorded | **BUILT** |
