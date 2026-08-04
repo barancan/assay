@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 import time
 from ..llm.provider import LLMConfigError, credential_status, key_env_for, read_key
-from .base import ModelRequest, ModelResponse
+from .base import ModelRequest, ModelResponse, parse_structured
+
+# Anthropic has no response-format switch: the way to force a shape is to declare a
+# single tool and require it. The name is arbitrary but must match in tool_choice.
+STRUCTURED_TOOL = "emit_verdict"
 
 
 class AnthropicAdapter:
@@ -73,6 +77,7 @@ class AnthropicAdapter:
     def invoke(self, req: ModelRequest) -> ModelResponse:
         client = self._client()
         params = {**self.params, **req.params}
+        schema = req.metadata.get("schema")
         kwargs = {
             "model": self.model,
             "max_tokens": params.get("max_tokens", 1024),
@@ -83,17 +88,43 @@ class AnthropicAdapter:
         # top-level, not as a message.
         if params.get("system"):
             kwargs["system"] = params["system"]
+        if schema:
+            kwargs["tools"] = [{"name": STRUCTURED_TOOL,
+                                "description": "Return the result as structured data.",
+                                "input_schema": schema}]
+            kwargs["tool_choice"] = {"type": "tool", "name": STRUCTURED_TOOL}
+        elif req.metadata.get("tools"):
+            kwargs["tools"] = req.metadata["tools"]
         t0 = time.perf_counter()
         msg = client.messages.create(**kwargs)
         latency = (time.perf_counter() - t0) * 1000
-        text = "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
-        parsed = _maybe_json(text)
-        return ModelResponse(text=text, raw=msg.model_dump(), json=parsed, latency_ms=latency,
-                             usage={"input_tokens": msg.usage.input_tokens,
-                                    "output_tokens": msg.usage.output_tokens})
+        blocks = list(getattr(msg, "content", None) or [])
+        text = "".join(b.text for b in blocks if getattr(b, "type", "") == "text")
+        tool_calls = [{"id": getattr(b, "id", None), "name": getattr(b, "name", None),
+                       "input": getattr(b, "input", None)}
+                      for b in blocks if getattr(b, "type", "") == "tool_use"] or None
+        usage = {"input_tokens": msg.usage.input_tokens,
+                 "output_tokens": msg.usage.output_tokens}
+        raw = msg.model_dump()
+        if not schema:
+            return ModelResponse(text=text, raw=raw, json=_maybe_json(text),
+                                 tool_calls=tool_calls, latency_ms=latency, usage=usage)
+        # Structured mode: the tool input is the answer. Falling back to the text
+        # block would defeat the point of forcing the tool in the first place.
+        if not tool_calls:
+            return ModelResponse(
+                text=text, raw=raw, latency_ms=latency, usage=usage, status="error",
+                error="anthropic answered with text, not the forced structured tool call")
+        parsed, err = parse_structured(tool_calls[0]["input"], schema, provider="anthropic")
+        if err:
+            return ModelResponse(text=text, raw=raw, tool_calls=tool_calls, latency_ms=latency,
+                                 usage=usage, status="error", error=err)
+        return ModelResponse(text=text or json.dumps(parsed), raw=raw, json=parsed,
+                             tool_calls=tool_calls, latency_ms=latency, usage=usage)
 
     def complete(self, messages, *, schema=None, tools=None, params=None) -> ModelResponse:
-        return self.invoke(ModelRequest(input={"messages": messages}, params=params or {}))
+        return self.invoke(ModelRequest(input={"messages": messages}, params=params or {},
+                                        metadata={"schema": schema, "tools": tools}))
 
 
 def _is_auth_error(exc: Exception) -> bool:

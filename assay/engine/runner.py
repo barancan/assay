@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,6 +26,22 @@ def _git_commit() -> str | None:
         return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"],
                                        text=True, stderr=subprocess.DEVNULL).strip()
     except Exception:
+        return None
+
+
+def _interface_hash(target) -> str | None:
+    """Hash of the interface description this target was built against, when there is one.
+
+    Recorded on the run's TargetModel so a report can say which request/response shape
+    the pipeline assumed -- an interface that changed under a pipeline is exactly what
+    makes yesterday's green run meaningless. The column has existed since the first
+    schema and went unpopulated until now.
+    """
+    try:
+        from ..generator.interface import interface_from_target
+        return interface_from_target(target).hash or None
+    except Exception:
+        # Provenance is worth recording but never worth failing a run over.
         return None
 
 
@@ -153,7 +170,8 @@ def _setup_run(
         with session_scope() as s:
             tm = TargetModel(project=spec.project, adapter=spec.target.adapter,
                              model=spec.target.model, endpoint=spec.target.endpoint,
-                             params=spec.target.params)
+                             params=spec.target.params,
+                             interface_hash=_interface_hash(spec.target))
             s.add(tm)
             s.flush()
             run = Run(project=spec.project, spec_hash=spec_hash(spec),
@@ -278,8 +296,34 @@ def start_run(
             if ctx.tmpdir:
                 shutil.rmtree(ctx.tmpdir, ignore_errors=True)
 
-    threading.Thread(target=_worker, name=f"assay-run-{ctx.run_id}", daemon=True).start()
+    thread = threading.Thread(target=_worker, name=f"assay-run-{ctx.run_id}", daemon=True)
+    _track(thread)
+    thread.start()
     return ctx.run_id
+
+
+# Background runs resolve the session factory from module globals every time they touch
+# the DB, so a run still in flight when the process reconfigures its store will write
+# somewhere unexpected. Keeping handles lets callers wait for quiescence -- which tests
+# need between cases, and a graceful shutdown wants before exiting.
+_RUN_THREADS: list[threading.Thread] = []
+_RUN_THREADS_LOCK = threading.Lock()
+
+
+def _track(thread: threading.Thread) -> None:
+    with _RUN_THREADS_LOCK:
+        _RUN_THREADS[:] = [t for t in _RUN_THREADS if t.is_alive()]
+        _RUN_THREADS.append(thread)
+
+
+def wait_for_runs(timeout: float = 30.0) -> bool:
+    """Block until every background run finishes. True if all completed in time."""
+    with _RUN_THREADS_LOCK:
+        pending = list(_RUN_THREADS)
+    deadline = time.monotonic() + timeout
+    for thread in pending:
+        thread.join(max(0.0, deadline - time.monotonic()))
+    return not any(t.is_alive() for t in pending)
 
 
 def _submit_and_export(run_id: int, actor: str) -> None:

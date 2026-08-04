@@ -23,6 +23,13 @@ def init(path: str = typer.Argument(".", help="project directory")):
     (p / "generated" / "checks").mkdir(parents=True, exist_ok=True)
     (p / "generated" / "rubrics").mkdir(parents=True, exist_ok=True)
     (p / "datasets").mkdir(parents=True, exist_ok=True)
+    # A scaffolded directory nobody can guess the format of is scaffolding nobody uses:
+    # show the one-object-per-line shape `assay generate --dataset` expects.
+    sample = p / "datasets" / "example.jsonl"
+    if not sample.exists():
+        sample.write_text(
+            '{"id": "greeting", "input": {"prompt": "Summarise this contract clause."}}\n'
+            '{"id": "empty-clause", "input": {"prompt": ""}}\n')
     req = p / "requirements.md"
     if not req.exists():
         req.write_text("# Assessment requirements\n\n"
@@ -36,6 +43,12 @@ def generate(
     requirements: str = typer.Option("requirements.md"),
     target_adapter: str = typer.Option("mock", "--adapter"),
     target_import: str = typer.Option(None, "--import"),
+    interface: str = typer.Option(None, "--interface",
+                                  help="Postman/OpenAPI/MCP file to ground case "
+                                       "generation on (defaults to --import)"),
+    dataset: str = typer.Option(None, "--dataset",
+                                help="JSONL golden dataset; bind cases to it instead "
+                                     "of generating them"),
     request: str = typer.Option(None),
     out: str = typer.Option("."),
     judge: str = typer.Option(None, help="provider:model for the build model, "
@@ -61,20 +74,37 @@ def generate(
         target["request"] = request
     judge_obj, judges = _resolve_build_model(judge, offline, project)
 
+    iface_path = interface or target_import
+    if dataset:
+        console.print(f"[cyan]cases bound to dataset[/] {dataset}")
+    elif iface_path:
+        console.print(f"[cyan]case inputs grounded on[/] {iface_path}")
+
+    # A missing interface or dataset file, or a model reply that cannot become a
+    # pipeline, is a message the user can act on -- not a traceback.
+    try:
+        if to_db:
+            from .store.db import init_db
+            from .generator.build import build_pipeline_to_db
+            init_db()
+            pv_id = build_pipeline_to_db(requirements, target, out, judge=judge_obj,
+                                         judges=judges, project=project, created_by=by,
+                                         allow_heuristic=offline, interface_path=interface,
+                                         dataset=dataset)
+        else:
+            from .generator import build_pipeline
+            path = build_pipeline(requirements, target, out, judge=judge_obj,
+                                  judges=judges, project=project, allow_heuristic=offline,
+                                  interface_path=interface, dataset=dataset)
+    except (OSError, ValueError) as e:
+        console.print(f"[red]{e}[/]")
+        raise typer.Exit(1)
+
     if to_db:
-        from .store.db import init_db
-        from .generator.build import build_pipeline_to_db
-        init_db()
-        pv_id = build_pipeline_to_db(requirements, target, out, judge=judge_obj,
-                                     judges=judges, project=project, created_by=by,
-                                     allow_heuristic=offline)
         console.print(f"[green]pipeline version {pv_id} created (draft)[/]")
         console.print("[yellow]activate it before running: assay pipeline activate "
                       f"{pv_id} --by REVIEWER[/]")
     else:
-        from .generator import build_pipeline
-        path = build_pipeline(requirements, target, out, judge=judge_obj,
-                              judges=judges, project=project, allow_heuristic=offline)
         console.print(f"[green]pipeline written[/] {path}")
         console.print("[yellow]review generated/ before running in production[/]")
 

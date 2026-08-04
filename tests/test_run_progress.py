@@ -22,6 +22,11 @@ def _tmp_db(tmp_path, monkeypatch):
     from assay.store.db import init_db as _init
     _init()
     yield
+    # Background runs resolve the session factory from module globals on every DB
+    # touch, so a run still in flight when the next test reloads the store would
+    # write into that test's database. Wait for quiescence before tearing down.
+    from assay.engine import wait_for_runs
+    assert wait_for_runs(timeout=30), "a background run outlived its test"
 
 
 def _spec(n_cases: int = 3) -> dict:
