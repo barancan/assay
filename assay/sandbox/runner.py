@@ -10,13 +10,18 @@ Containment, in layers:
   * import ALLOWLIST: only pure-computation stdlib + check helpers resolve;
     os / sys / socket / subprocess / importlib / ctypes / urllib / requests ...
     raise ImportError
-  * builtins `open`, `exec`, `eval`, `compile` removed inside the check
+  * builtins `open`, `exec`, `eval`, `compile` removed
   * socket factories patched to raise (defence in depth)
 
+The allowlist and the builtins removal are installed *before* the module body is
+executed, so they cover the module's top-level statements as well as check().
+
 This stops accidental and naive-malicious I/O. It is NOT a guarantee against a
-determined adversary with native-code tricks — for untrusted third-party code,
-run Assay with the hardened tier (gVisor / Firecracker / WASM), documented in
-the design under "sandbox strength". The contract a generated module must meet:
+determined adversary with native-code tricks, and it does NOT isolate the
+filesystem or block egress at the OS level — the subprocess inherits the engine's
+working directory. For untrusted third-party code, run Assay with a hardened tier
+(gVisor / Firecracker / WASM), which is not yet implemented. The contract a
+generated module must meet:
 
     def check(response: dict, context: dict) -> dict
 """
@@ -59,30 +64,22 @@ _WORKER = textwrap.dedent('''
         try: importlib.import_module(_m)
         except Exception: pass
 
-    # Load the user module BEFORE locking imports (its own top-level imports run now).
-    spec = importlib.util.spec_from_file_location("genchk", payload["module_path"])
-    mod = importlib.util.module_from_spec(spec)
-
-    _real_import = builtins.__import__
-    def _guard(name, *a, **k):
-        top = name.split(".")[0]
-        if top not in ALLOWED:
-            raise ImportError(f"import of '{name}' blocked in sandbox")
-        return _real_import(name, *a, **k)
-
+    # Read and compile the user module while the builtins we are about to remove are
+    # still available. Nothing from the module has executed at this point -- compile()
+    # only parses. The lockdown below therefore covers the module's top-level
+    # statements and imports, not just the body of check().
     try:
-        spec.loader.exec_module(mod)
+        with open(payload["module_path"], "r") as _fh:
+            _source = _fh.read()
+        _code = compile(_source, payload["module_path"], "exec")
     except Exception as e:
         print(json.dumps({"error": f"load error: {type(e).__name__}: {e}"})); sys.exit(0)
 
-    if not hasattr(mod, "check"):
-        print(json.dumps({"error": "module defines no check(response, context)"})); sys.exit(0)
+    _real_import = builtins.__import__
+    _real_exec = exec
 
-    # Lock down for the duration of check() execution.
-    builtins.__import__ = _guard
-    for _b in ("open", "exec", "eval", "compile"):
-        if hasattr(builtins, _b):
-            setattr(builtins, _b, None)
+    # Patch socket BEFORE the import guard is installed: afterwards `socket` is not
+    # allowlisted, so importing it here would raise and the patch would be skipped.
     try:
         import socket
         socket.socket = lambda *a, **k: (_ for _ in ()).throw(OSError("network blocked"))
@@ -90,8 +87,30 @@ _WORKER = textwrap.dedent('''
     except Exception:
         pass
 
+    def _guard(name, *a, **k):
+        top = name.split(".")[0]
+        if top not in ALLOWED:
+            raise ImportError(f"import of '{name}' blocked in sandbox")
+        return _real_import(name, *a, **k)
+
+    # Lock down for module execution AND check() execution.
+    builtins.__import__ = _guard
+    for _b in ("open", "exec", "eval", "compile"):
+        if hasattr(builtins, _b):
+            setattr(builtins, _b, None)
+
+    _ns = {"__name__": "genchk", "__file__": payload["module_path"], "__builtins__": builtins}
     try:
-        out = mod.check(payload["response"], payload["context"])
+        _real_exec(_code, _ns)
+    except Exception as e:
+        print(json.dumps({"error": f"load error: {type(e).__name__}: {e}"})); sys.exit(0)
+
+    _check = _ns.get("check")
+    if _check is None:
+        print(json.dumps({"error": "module defines no check(response, context)"})); sys.exit(0)
+
+    try:
+        out = _check(payload["response"], payload["context"])
         print(json.dumps({"result": out}))
     except Exception as e:
         print(json.dumps({"error": f"{type(e).__name__}: {e}"}))
