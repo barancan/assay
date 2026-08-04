@@ -65,9 +65,9 @@ disagrees with this page, this page is right and the other is a bug.
 | Isolated subprocess, CPU/memory rlimits, wall-clock timeout | **Built** | POSIX only; rlimits no-op elsewhere |
 | Import allowlist, `open`/`exec`/`eval`/`compile` removed | **Built** | Installed before the module body executes (fixed 2026-08-04) |
 | Socket factories patched | **Built** | Defence in depth, not an egress block |
-| Filesystem isolation | **Planned** | The subprocess inherits the engine's working directory. There is no chroot, namespace, or temp-dir jail |
-| OS-level network deny-all | **Planned** | |
-| Hardened tier (gVisor / Firecracker / WASM) | **Planned** | |
+| Filesystem isolation | **Built** | The child runs in a throwaway cwd with an empty environment, and the source is read by the parent so the child never needs `open`. Not a chroot: a check that defeated the import allowlist could still address absolute paths |
+| OS-level network deny-all | **Partial** | A network namespace with no interfaces where unprivileged `unshare` works (Linux with user namespaces). Elsewhere it falls back to patched socket factories behind the import allowlist. `sandbox_tier()` reports which applies |
+| Hardened tier (gVisor / Firecracker / WASM) | **Planned** | For genuinely untrusted third-party code; run Assay inside your own VM or container boundary until then |
 
 ## Engine and runs
 

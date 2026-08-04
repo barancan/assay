@@ -129,28 +129,41 @@ What that looks like in the current build:
 | Route deterministic vs. judge | Decided by the same call; no rationale is recorded |
 | Template checks | Working — 11 primitives |
 | Generated functions | **Not implemented.** Routing an intent to `generated` produces a spec entry with no source behind it |
-| Judge rubrics | A fixed single-dimension rubric, not the anchored multi-dimension rubric the design describes |
-| Test cases | Emitted with empty inputs |
-| Interface grounding | The target's interface is parsed — Postman collections (nested folders, named requests, `{{variables}}`, auth), OpenAPI 3 in JSON or YAML (local `$ref`s resolved, request fields and JSONPath response paths derived), and MCP tool schemas. The `rest` adapter imports through the same parser. Not yet consumed by case generation |
+| Judge rubrics | Model-authored, at least two anchored dimensions with observable 0/1/2 levels, validated and repaired once before falling back to a deterministic rubric. Verdicts are schema-forced and their evidence quotes are verified against the response |
+| Test cases | Concrete inputs per intent, grounded on the interface's real request fields, with nominal, empty, boundary and hostile variants. A golden dataset can be bound instead with `--dataset` |
+| Interface grounding | The target's interface is parsed — Postman collections (nested folders, named requests, `{{variables}}`, auth), OpenAPI 3 in JSON or YAML (local `$ref`s resolved, request fields and JSONPath response paths derived), and MCP tool schemas. The `rest` adapter imports through the same parser, and case generation consumes it |
 
 Closing this gap is the current priority — see the roadmap in
 [`docs/STATUS.md`](docs/STATUS.md).
 
 ## Sandbox honesty
 
-Generated checks are **pure functions of captured data** -- they receive dicts,
-never a model client. They run in an isolated subprocess with CPU/memory
-rlimits, a wall-clock timeout, an import allowlist (no `os`/`socket`/`subprocess`/...),
-and `open`/`exec`/`eval`/`compile` removed. The lockdown is installed before the
-module body executes, so it covers a check's top-level statements as well as the
-body of `check()`.
+Generated checks are **pure functions of captured data** -- they receive dicts, never a
+model client. Each one runs in a separate isolated interpreter with:
 
-What this does **not** do, despite what earlier versions of this file claimed:
-the subprocess inherits the engine's working directory (there is no filesystem
-jail) and there is no OS-level egress block — only the `socket` factories are
-patched, as defence in depth. This contains buggy and naive-malicious checks; it
-is not a boundary for genuinely untrusted third-party code. A hardened tier
-(gVisor / Firecracker / WASM) is designed but **not implemented**.
+- an **empty environment** -- the parent's variables, including provider API keys, are
+  not inherited
+- a **throwaway working directory**, so relative paths reach nothing and the repo and
+  `.assay/` are not the cwd
+- a **network namespace with no interfaces** on Linux hosts that allow unprivileged
+  `unshare` -- a real egress block, not a monkeypatch
+- CPU and address-space rlimits plus a hard wall-clock timeout
+- an import allowlist (no `os`/`socket`/`subprocess`/...) and `open`/`exec`/`eval`/
+  `compile` removed, both installed **before** the module body executes, so they cover
+  a check's top-level statements as well as `check()`
+
+The source is read by the trusted parent and passed in, so the child never needs
+filesystem access at all.
+
+Where the network namespace is unavailable -- non-Linux hosts, or kernels with user
+namespaces disabled -- egress falls back to patched socket factories behind the import
+allowlist, which is weaker. `assay.sandbox.sandbox_tier()` reports which layers are
+actually active on your host, because a containment claim that isn't true is worse than
+one that's merely modest.
+
+This is not a guarantee against a determined adversary with native-code tricks. For
+genuinely untrusted third-party code, run Assay inside a VM or container boundary you
+control.
 
 ## Adapters
 
