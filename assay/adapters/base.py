@@ -39,7 +39,13 @@ class TargetAdapter(Protocol):
     def describe(self) -> dict[str, Any]: ...
     def invoke(self, req: ModelRequest) -> ModelResponse: ...
     def ping(self) -> dict[str, Any]:
-        """Return {"ok": bool, "latency_ms": float | None, "error": str | None}."""
+        """Report reachability and, where it can be determined, credential validity.
+
+        Returns {"ok": bool, "reachable": bool, "authenticated": bool | None,
+                 "latency_ms": float | None, "error": str | None, "env_var": str | None}.
+        `authenticated` is None when the probe cannot tell (no credential is needed,
+        or the server never answered). `env_var` is a variable NAME, never a value.
+        """
         ...
 
 

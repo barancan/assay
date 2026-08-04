@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Run {{ run_id }}{% endblock %}
+{% block content %}
+
+<div style="display:flex;align-items:center;gap:.6rem;margin-bottom:1.25rem">
+  <a href="/projects/{{ progress.project | urlencode }}" class="btn btn-ghost"
+     style="padding:.3rem .5rem;font-size:13px">
+    <i class="ti ti-arrow-left" aria-hidden="true"></i> Back to project
+  </a>
+  <h1 style="margin:0">Run {{ run_id }}</h1>
+</div>
+
+<div class="card">
+  <h2 style="margin:0 0 .85rem;font-size:15px">
+    <i class="ti ti-player-play" aria-hidden="true"></i> Progress
+  </h2>
+
+  {% include "_run_progress.html" %}
+
+  <p style="margin:1rem 0 0;color:var(--text-muted);font-size:13px">
+    You can leave this page. The run continues, and the report appears in the
+    <a href="/" style="color:var(--text-accent)">review queue</a> when it finishes.
+  </p>
+</div>
+
+{% endblock %}

@@ -16,6 +16,12 @@ def _tmp_db(tmp_path, monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _builder(builder_llm):
+    """Every build path needs a model; inject the fake so no API key is required."""
+    return builder_llm
+
+
 @pytest.fixture
 def client(_tmp_db):
     import importlib

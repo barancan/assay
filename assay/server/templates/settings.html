@@ -52,6 +52,78 @@
   </div>
 </div>
 
+<!-- Providers -->
+<div class="card" x-data="{
+  builderAdapter: {{ builder_adapter | tojson }},
+  builderModel: {{ builder_model | tojson }},
+  saved: false,
+  async save() {
+    await fetch('/settings/builder', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({builder_adapter: this.builderAdapter, builder_model: this.builderModel})
+    });
+    this.saved = true;
+    setTimeout(() => { this.saved = false; }, 2500);
+  }
+}">
+  <h2 style="margin:0 0 .5rem">
+    <i class="ti ti-key" aria-hidden="true"></i> Providers
+  </h2>
+  <p style="font-size:14px;color:var(--text-muted);margin:0 0 .75rem">
+    API keys live in the environment. Assay reads them by variable name and never
+    stores or displays a key value.
+  </p>
+  <div style="display:grid;gap:.4rem;max-width:34rem">
+    {% for cred in provider_credentials %}
+    <div style="display:flex;gap:.5rem;align-items:center">
+      <span style="font-size:13px;width:9rem;color:var(--text-secondary)">{{ cred.adapter }}</span>
+      {% if cred.requires_key %}
+        <code>{{ cred.env_var }}</code>
+        {% if cred.configured %}
+        <span class="badge badge-pass">
+          <i class="ti ti-circle-check" aria-hidden="true"></i> Configured
+        </span>
+        {% else %}
+        <span class="badge badge-warning">
+          <i class="ti ti-alert-triangle" aria-hidden="true"></i> Not configured
+        </span>
+        {% endif %}
+      {% else %}
+        <span class="badge badge-neutral">No key required</span>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <h3 style="font-size:14px;font-weight:600;margin:1.1rem 0 .5rem">Pipeline builder model</h3>
+  <p style="font-size:14px;color:var(--text-muted);margin:0 0 .75rem">
+    Used to turn requirements into a pipeline. Defaults to the judge model above.
+  </p>
+  <div style="display:grid;gap:.5rem;grid-template-columns:1fr 1fr;max-width:30rem">
+    <div>
+      <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Adapter</label>
+      <select x-model="builderAdapter" style="width:100%">
+        <option value="anthropic">anthropic</option>
+        <option value="openai_compat">OpenAI-compatible</option>
+        <option value="ollama">ollama</option>
+      </select>
+    </div>
+    <div>
+      <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Model</label>
+      {{ model_selector('builderModel', 'builderAdapter') }}
+    </div>
+  </div>
+  <div style="display:flex;gap:.75rem;align-items:center;margin-top:.75rem">
+    <button type="button" class="btn btn-primary" @click="save()">
+      <i class="ti ti-device-floppy" aria-hidden="true"></i> Save
+    </button>
+    <span x-show="saved" style="font-size:13px;color:var(--text-success)">
+      <i class="ti ti-circle-check" aria-hidden="true"></i> Saved
+    </span>
+  </div>
+</div>
+
 <!-- Auth posture -->
 <div class="card">
   <h2 style="margin:0 0 .5rem">

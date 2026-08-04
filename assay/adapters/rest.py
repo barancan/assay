@@ -1,4 +1,8 @@
-"""Generic REST target with optional Postman-collection / OpenAPI import."""
+"""Generic REST target with optional Postman-collection import.
+
+OpenAPI import is designed but not implemented -- `import_` is parsed as JSON, so an
+OpenAPI YAML file raises. See docs/STATUS.md.
+"""
 from __future__ import annotations
 import json
 import re
@@ -6,6 +10,7 @@ import time
 from pathlib import Path
 from typing import Any
 import requests
+from ..llm.provider import LLMConfigError
 from .base import ModelRequest, ModelResponse
 
 _VAR = re.compile(r"\{\{(\w+)\}\}")
@@ -54,12 +59,22 @@ class RestAdapter:
     def describe(self) -> dict:
         return {"adapter": self.name, "endpoint": self.template.get("url")}
 
+    def _token_env(self) -> str | None:
+        """Name of the variable holding this target's bearer token, if it uses one."""
+        if self.auth.get("type") != "bearer":
+            return None
+        return self.auth.get("token_env") or None
+
     def ping(self) -> dict:
+        import os
         import time
         from urllib.parse import urlparse
+        env_var = self._token_env()
+        configured = bool(os.environ.get(env_var)) if env_var else True
         url = self.template.get("url")
         if not url:
-            return {"ok": True, "latency_ms": 0.0, "error": None}
+            return {"ok": True, "reachable": True, "authenticated": None,
+                    "latency_ms": 0.0, "error": None, "env_var": env_var}
         concrete = _subst(url, self.variables)
         parsed = urlparse(concrete)
         # Ping the server root; any HTTP response means the server is reachable.
@@ -67,19 +82,36 @@ class RestAdapter:
         t0 = time.perf_counter()
         try:
             requests.head(base, timeout=5, allow_redirects=True)
-            return {"ok": True, "latency_ms": (time.perf_counter() - t0) * 1000, "error": None}
         except requests.RequestException as exc:
             return {
                 "ok": False,
+                "reachable": False,
+                "authenticated": None,
                 "latency_ms": (time.perf_counter() - t0) * 1000,
                 "error": f"{base}: {exc}",
+                "env_var": env_var,
             }
+        latency = (time.perf_counter() - t0) * 1000
+        if env_var and not configured:
+            return {"ok": False, "reachable": True, "authenticated": False,
+                    "latency_ms": latency, "error": f"{env_var} is not set",
+                    "env_var": env_var}
+        # The root probe is unauthenticated, so it says nothing about the token.
+        return {"ok": True, "reachable": True, "authenticated": None,
+                "latency_ms": latency, "error": None, "env_var": env_var}
 
     def _headers(self) -> dict:
         h = dict(self.template.get("headers", {}))
+        env_var = self._token_env()
         if self.auth.get("type") == "bearer":
             import os
-            token = os.environ.get(self.auth.get("token_env", ""), "")
+            if not env_var:
+                raise LLMConfigError("bearer auth needs auth.token_env (the variable name)",
+                                     adapter=self.name)
+            token = os.environ.get(env_var, "")
+            if not token:
+                raise LLMConfigError(f"{env_var} is not set", adapter=self.name,
+                                     env_var=env_var)
             h["Authorization"] = f"Bearer {token}"
         return h
 

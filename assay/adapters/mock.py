@@ -19,7 +19,9 @@ class MockAdapter:
         return {"adapter": self.name, "capabilities": ["text", "json"]}
 
     def ping(self) -> dict:
-        return {"ok": True, "latency_ms": 0.0, "error": None}
+        # In-process: always reachable, never has a credential to authenticate.
+        return {"ok": True, "reachable": True, "authenticated": None,
+                "latency_ms": 0.0, "error": None, "env_var": None}
 
     def invoke(self, req: ModelRequest) -> ModelResponse:
         t0 = time.perf_counter()

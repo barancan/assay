@@ -1,17 +1,23 @@
 # Assay: an open-source eval-pipeline builder
 
-Point Assay at a deployed model (HTTP endpoint, MCP, or SDK), hand it your
-assessment requirements, and it **builds the eval pipeline for you**: it decides
-what to test, routes each test to the right approach (deterministic template,
-sandboxed generated function, or LLM judge), runs it, and produces a saved,
-reviewable report that a named human must sign off before it is considered
-production ready.
+Point Assay at a deployed model (HTTP endpoint or SDK), hand it your assessment
+requirements, and it **builds the eval pipeline for you**: it decides what to
+test, routes each test to the right approach (deterministic template, sandboxed
+generated function, or LLM judge), runs it, and produces a saved, reviewable
+report that a named human must sign off before it is considered production ready.
+
+> **Status: pre-1.0, and the builder half is not finished.** The runner — execute,
+> review, adjudicate, approve, audit — works end to end. The builder derives test
+> intents with a real model on every path (`assay generate --offline` is the only
+> way to get the old keyword heuristic), but **LLM codegen is not implemented yet**. Read
+> [`docs/STATUS.md`](docs/STATUS.md) before you rely on anything below; every
+> capability is marked built, partial, or planned.
 
 ## Why it exists
 
 - **Eval-as-code.** The pipeline (`assay.yaml` + `generated/`) lives in your repo, diffable and version-pinned.
-- **Three ways to test.** Vetted templates where a mechanical check fits; LLM-generated Python (sandboxed) where it does not; LLM judges for semantic calls.
-- **Provider-agnostic.** Targets and judges: Anthropic, OpenAI / OpenAI-compatible, Ollama, generic REST (Postman/OpenAPI import), and custom adapters.
+- **Three ways to test.** Vetted templates where a mechanical check fits; LLM-generated Python (sandboxed) where it does not; LLM judges for semantic calls. *Templates and judges work today; generated-function codegen is [planned](docs/STATUS.md#builder-requirements--pipeline).*
+- **Provider-agnostic.** Targets and judges: Anthropic, OpenAI / OpenAI-compatible, Ollama, and generic REST with Postman import.
 - **Auditable and gated.** Every run records the tested model, test cases, full responses, and the approver. Reports move `pending → ready_for_review → done`; automation can trigger runs but only a reviewer can promote to `done`.
 
 ## Install
@@ -114,21 +120,46 @@ vs. judge, materialise (template | generated function | rubric), generate
 cases, emit `assay.yaml` + `generated/` for **your review** before anything
 runs in production. See `assay-design.md` for the full design.
 
+What that looks like in the current build:
+
+| Stage | Today |
+|---|---|
+| Derive intents | Real LLM on every path — the web UI and `assay generate` both resolve the configured build model, and fail with the missing variable's name rather than degrading. `assay generate --offline` opts back into the keyword heuristic |
+| Requirement traceability | Requirements are split into `R1…Rn` (`generator/ingest.py`); every intent must cite one, and each becomes its own suite so the coverage matrix has real buckets |
+| Route deterministic vs. judge | Decided by the same call; no rationale is recorded |
+| Template checks | Working — 11 primitives |
+| Generated functions | **Not implemented.** Routing an intent to `generated` produces a spec entry with no source behind it |
+| Judge rubrics | A fixed single-dimension rubric, not the anchored multi-dimension rubric the design describes |
+| Test cases | Emitted with empty inputs; the target interface is not parsed at build time |
+
+Closing this gap is the current priority — see the roadmap in
+[`docs/STATUS.md`](docs/STATUS.md).
+
 ## Sandbox honesty
 
 Generated checks are **pure functions of captured data** -- they receive dicts,
 never a model client. They run in an isolated subprocess with CPU/memory
 rlimits, a wall-clock timeout, an import allowlist (no `os`/`socket`/`subprocess`/...),
-and `open` disabled. This contains buggy and naive-malicious checks. For
-genuinely untrusted third-party code, enable the hardened tier
-(gVisor / Firecracker / WASM) -- see the design doc.
+and `open`/`exec`/`eval`/`compile` removed. The lockdown is installed before the
+module body executes, so it covers a check's top-level statements as well as the
+body of `check()`.
+
+What this does **not** do, despite what earlier versions of this file claimed:
+the subprocess inherits the engine's working directory (there is no filesystem
+jail) and there is no OS-level egress block — only the `socket` factories are
+patched, as defence in depth. This contains buggy and naive-malicious checks; it
+is not a boundary for genuinely untrusted third-party code. A hardened tier
+(gVisor / Firecracker / WASM) is designed but **not implemented**.
 
 ## Adapters
 
 | Kind | Built-in |
 |---|---|
-| Target | `mock`, `rest` (+Postman/OpenAPI import), `anthropic`, `openai_compat`, `ollama`, `custom` |
-| Judge  | `anthropic`, `openai_compat`, `ollama`, `mock` |
+| Target | `mock` (tests only), `rest` (Postman import), `anthropic`, `openai_compat`, `ollama` |
+| Judge  | `anthropic`, `openai_compat`, `ollama`, `mock` (tests only) |
+
+Planned, not yet implemented: `mcp` and `custom` target adapters, and OpenAPI
+import for `rest` (only Postman collections parse today).
 
 ## License
 

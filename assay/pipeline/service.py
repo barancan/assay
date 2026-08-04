@@ -1,7 +1,7 @@
 """CRUD operations for Pipeline and PipelineVersion records."""
 from __future__ import annotations
 import datetime as dt
-from pathlib import Path  # used by regenerate_check stub source naming
+from pathlib import Path
 from sqlalchemy import func
 from ..store import session_scope
 from ..store.models import Pipeline, PipelineVersion, User
@@ -255,12 +255,20 @@ def regenerate_check(version_id: int, check_path: str, actor: str) -> int:
                     if chk.get("uses") == check_path:
                         assertion = case.get("id", check_path)
 
-        fn_name = Path(check_path).stem.replace("-", "_")
+        # The sandbox contract is a module-level check(response, context) -> dict
+        # (see assay/sandbox/runner.py). A stub that does not meet it fails at run
+        # time with "module defines no check(response, context)", so the scaffold
+        # must match the contract exactly and fail loudly until it is filled in.
         new_source = (
-            f"# Regenerated check: {assertion}\n"
-            f"def {fn_name}(response, **kwargs):\n"
-            f"    # TODO: implement check logic\n"
-            f"    return True\n"
+            f"# Regenerated check: {assertion or check_path}\n"
+            f"# Scaffold only -- LLM codegen is not implemented yet. Edit the body,\n"
+            f"# or replace it via the inline editor on the pipeline review screen.\n"
+            f'def check(response, context):\n'
+            f'    return {{\n'
+            f'        "passed": False,\n'
+            f'        "severity": "fail",\n'
+            f'        "message": "check {check_path} is an unimplemented scaffold",\n'
+            f'    }}\n'
         )
         new_sources = {**existing, check_path: new_source}
         pid = pv.pipeline_id

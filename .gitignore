@@ -32,3 +32,6 @@ htmlcov/
 
 # Internal planning docs (not part of the public project)
 BUILD_PLAN.md
+
+# Agent worktrees
+.claude/worktrees/

@@ -31,6 +31,7 @@ _DIR = os.path.dirname(__file__)
 _TEMPLATES_DIR = os.path.join(_DIR, "templates")
 _STATIC_DIR = os.path.join(_DIR, "static")
 
+from html import escape
 from urllib.parse import quote as _urlquote
 
 templates = Jinja2Templates(directory=_TEMPLATES_DIR)
@@ -315,6 +316,8 @@ def connection_test_route(body: ConnectionTestBody):
         spec["model"] = body.model
     if body.endpoint:
         spec["endpoint"] = body.endpoint
+    if body.key_env:
+        spec["key_env"] = body.key_env
     result = test_connection(spec)
     if result.get("ok"):
         ms = result.get("latency_ms") or 0
@@ -323,8 +326,17 @@ def connection_test_route(body: ConnectionTestBody):
             f'<i class="ti ti-circle-check" aria-hidden="true"></i>'
             f" Connected {ms:.0f} ms</span>"
         )
+    elif result.get("authenticated") is False:
+        # Reachable (or not even tried) but no usable credential — distinct from
+        # "unreachable", and never a green badge.
+        msg = escape((result.get("error") or "no credential")[:120])
+        html = (
+            f'<span id="connection-result" class="badge badge-warning">'
+            f'<i class="ti ti-alert-triangle" aria-hidden="true"></i>'
+            f" Not authenticated — {msg}</span>"
+        )
     else:
-        err = (result.get("error") or "connection failed")[:120]
+        err = escape((result.get("error") or "connection failed")[:120])
         html = (
             f'<span id="connection-result" class="badge badge-fail">'
             f'<i class="ti ti-circle-x" aria-hidden="true"></i>'
@@ -338,10 +350,47 @@ class PreviewBody(BaseModel):
     adapter: str | None = None
 
 
-@app.post("/pipelines/preview")
-def pipeline_preview(body: PreviewBody):
+def _derive_intents_or_422(requirements: str, project: str | None = None) -> list[dict]:
+    """Build intents with the workspace's builder model.
+
+    Every failure becomes a 422 whose detail is something the user can act on — the name
+    of the environment variable to set, or what the model got wrong. There is no silent
+    fallback to the offline heuristic: a keyword-built pipeline is indistinguishable from
+    a real one once persisted, so it must never happen by accident.
+    """
     from ..generator.build import derive_intents
-    intents = derive_intents(body.requirements, judge=None)
+    from ..llm.provider import LLMConfigError, resolve_builder_llm
+    try:
+        llm = resolve_builder_llm(project)
+    except LLMConfigError as e:
+        raise HTTPException(422, _llm_config_detail(e))
+    try:
+        return derive_intents(requirements, judge=llm)
+    except LLMConfigError as e:
+        raise HTTPException(422, _llm_config_detail(e))
+    except Exception as e:
+        raise HTTPException(422, f"could not build the pipeline: {e}"[:200])
+
+
+def _llm_config_detail(e) -> str:
+    detail = str(e)
+    if getattr(e, "env_var", None):
+        detail += (f". Set {e.env_var} in the server environment and restart, "
+                   f"or pick a different model in Settings.")
+    return detail[:200]
+
+
+@app.post("/pipelines/preview")
+def pipeline_preview(
+    body: PreviewBody,
+    request: Request,
+    x_assay_user: str | None = Header(default=None),
+):
+    # Preview now calls a real model, so every request costs tokens. Unauthenticated
+    # it would be an open spend vector for anyone who can reach the port. Open mode is
+    # unaffected -- this only bites in enforced mode, which is the deployed posture.
+    _require_identity(request, x_assay_user)
+    intents = _derive_intents_or_422(body.requirements)
     checks = [
         {
             "id": it["id"],
@@ -370,16 +419,21 @@ def pipeline_generate(
     request: Request,
     x_assay_user: str | None = Header(default=None),
 ):
-    from ..generator.build import derive_intents, intents_to_spec
+    import yaml
+    from ..generator.build import rubric_for, intents_to_spec
     from ..pipeline import create_version
     from ..pipeline.service import update_step_reached, activate_version, update_version_config
     actor = _require_identity(request, x_assay_user)
-    intents = derive_intents(body.requirements, judge=None)
+    intents = _derive_intents_or_422(body.requirements, body.project)
     judges = {"primary": body.judge_spec} if body.judge_spec else {}
     spec_dict = intents_to_spec(body.project, intents, body.adapter_spec, judges)
     spec_dict["requirements"] = body.requirements  # persist so wizard can restore it
+    # Judge checks reference a rubric path; store the rubric alongside so the version is
+    # runnable without a disk checkout.
+    rubrics = {f"generated/rubrics/{it['id']}.yaml": yaml.safe_dump(rubric_for(it), sort_keys=False)
+               for it in intents if it["how"] == "judge"}
     if body.pipeline_version_id:
-        update_version_config(body.pipeline_version_id, spec_dict, {}, {})
+        update_version_config(body.pipeline_version_id, spec_dict, {}, rubrics)
         version_id = body.pipeline_version_id
     else:
         with session_scope() as s:
@@ -396,7 +450,7 @@ def pipeline_generate(
                     s.add(pipe)
             s.flush()
             pid = pipe.id
-        pv = create_version(pid, spec_dict, {}, {}, actor)
+        pv = create_version(pid, spec_dict, {}, rubrics, actor)
         version_id = pv.id
     update_step_reached(version_id, "review")
     activated = True
@@ -445,6 +499,7 @@ def save_pipeline_draft(
 
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request):
+    from ..llm.provider import builder_choice, credential_overview
     with session_scope() as s:
         users = s.query(User).order_by(User.role, User.name).all()
         user_list = [{"name": u.name, "role": u.role} for u in users]
@@ -452,10 +507,15 @@ def settings_page(request: Request):
         jm = s.get(WorkspaceSetting, "judge_model")
         judge_adapter = ja.value if ja else "anthropic"
         judge_model = jm.value if jm else "claude-haiku-4-5-20251001"
+    builder_adapter, builder_model = builder_choice()
     return templates.TemplateResponse(request, "settings.html", {
         "users": user_list,
         "judge_adapter": judge_adapter,
         "judge_model": judge_model,
+        # Variable names and a configured yes/no — never a key value.
+        "provider_credentials": credential_overview(),
+        "builder_adapter": builder_adapter,
+        "builder_model": builder_model,
         "auth_mode": _config.auth_mode(),
         "identity": _identity(request),
     })
@@ -482,6 +542,28 @@ def update_judge_settings(body: JudgeSettingsBody):
     with session_scope() as s:
         s.merge(WorkspaceSetting(key="judge_adapter", value=body.judge_adapter))
         s.merge(WorkspaceSetting(key="judge_model", value=body.judge_model))
+    return {"ok": True}
+
+
+@app.get("/settings/builder")
+def settings_builder():
+    # Defaults are resolved at read time (judge settings, then built-in), so an
+    # existing workspace does not need a seed row it will never get.
+    from ..llm.provider import builder_choice
+    adapter, model = builder_choice()
+    return {"builder_adapter": adapter, "builder_model": model}
+
+
+class BuilderSettingsBody(BaseModel):
+    builder_adapter: str
+    builder_model: str
+
+
+@app.post("/settings/builder")
+def update_builder_settings(body: BuilderSettingsBody):
+    with session_scope() as s:
+        s.merge(WorkspaceSetting(key="builder_adapter", value=body.builder_adapter))
+        s.merge(WorkspaceSetting(key="builder_model", value=body.builder_model))
     return {"ok": True}
 
 
@@ -706,9 +788,27 @@ def trigger_run(
     request: Request,
     x_assay_user: str | None = Header(default=None),
 ):
-    from ..engine import execute_run, submit_for_review
+    from ..engine import execute_run, start_run, submit_for_review
     from ..reporting import export_report
     actor = _require_identity(request, x_assay_user)
+
+    # A browser gets an immediate redirect to a progress view: with real models a run
+    # takes minutes, and blocking the request leaves the user staring at a dead button.
+    # Programmatic callers (CI, the webhook, the JSON API) keep synchronous semantics,
+    # where the response carrying report_id is the whole point.
+    if _is_htmx(request):
+        try:
+            run_id = start_run(
+                pipeline_version_id=version_id,
+                trigger="manual",
+                triggered_by=actor,
+            )
+        except PermissionError as e:
+            raise HTTPException(403, str(e))
+        except Exception as e:
+            raise HTTPException(422, str(e)[:200])
+        return Response(headers={"HX-Redirect": f"/runs/{run_id}"})
+
     try:
         run_id = execute_run(
             pipeline_version_id=version_id,
@@ -724,9 +824,39 @@ def trigger_run(
         rep_id = rep.id
     submit_for_review(rep_id, actor=actor)
     export_report(run_id)
-    if _is_htmx(request):
-        return Response(headers={"HX-Redirect": f"/reports/{rep_id}"})
     return {"ok": True, "run_id": run_id, "report_id": rep_id}
+
+
+@app.get("/runs/{run_id}", response_class=HTMLResponse)
+def run_progress_page(request: Request, run_id: int):
+    from ..engine import run_progress
+    try:
+        progress = run_progress(run_id)
+    except ValueError:
+        raise HTTPException(404, f"Run {run_id} not found")
+    return templates.TemplateResponse(request, "run_progress.html", {
+        "progress": progress,
+        "run_id": run_id,
+        "identity": _identity(request),
+    })
+
+
+@app.get("/runs/{run_id}/progress", response_class=HTMLResponse)
+def run_progress_fragment(request: Request, run_id: int):
+    """Polled by the progress page. Redirects to the report once the run lands."""
+    from ..engine import run_progress
+    try:
+        progress = run_progress(run_id)
+    except ValueError:
+        raise HTTPException(404, f"Run {run_id} not found")
+
+    if progress["status"] == "complete" and progress["report_id"]:
+        return Response(headers={"HX-Redirect": f"/reports/{progress['report_id']}"})
+
+    return templates.TemplateResponse(request, "_run_progress.html", {
+        "progress": progress,
+        "run_id": run_id,
+    })
 
 
 @app.get("/pipelines/{pipeline_id}/versions")
