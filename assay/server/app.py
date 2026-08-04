@@ -338,10 +338,39 @@ class PreviewBody(BaseModel):
     adapter: str | None = None
 
 
+def _derive_intents_or_422(requirements: str, project: str | None = None) -> list[dict]:
+    """Build intents with the workspace's builder model.
+
+    Every failure becomes a 422 whose detail is something the user can act on — the name
+    of the environment variable to set, or what the model got wrong. There is no silent
+    fallback to the offline heuristic: a keyword-built pipeline is indistinguishable from
+    a real one once persisted, so it must never happen by accident.
+    """
+    from ..generator.build import derive_intents
+    from ..llm.provider import LLMConfigError, resolve_builder_llm
+    try:
+        llm = resolve_builder_llm(project)
+    except LLMConfigError as e:
+        raise HTTPException(422, _llm_config_detail(e))
+    try:
+        return derive_intents(requirements, judge=llm)
+    except LLMConfigError as e:
+        raise HTTPException(422, _llm_config_detail(e))
+    except Exception as e:
+        raise HTTPException(422, f"could not build the pipeline: {e}"[:200])
+
+
+def _llm_config_detail(e) -> str:
+    detail = str(e)
+    if getattr(e, "env_var", None):
+        detail += (f". Set {e.env_var} in the server environment and restart, "
+                   f"or pick a different model in Settings.")
+    return detail[:200]
+
+
 @app.post("/pipelines/preview")
 def pipeline_preview(body: PreviewBody):
-    from ..generator.build import derive_intents
-    intents = derive_intents(body.requirements, judge=None)
+    intents = _derive_intents_or_422(body.requirements)
     checks = [
         {
             "id": it["id"],
@@ -370,16 +399,21 @@ def pipeline_generate(
     request: Request,
     x_assay_user: str | None = Header(default=None),
 ):
-    from ..generator.build import derive_intents, intents_to_spec
+    import yaml
+    from ..generator.build import rubric_for, intents_to_spec
     from ..pipeline import create_version
     from ..pipeline.service import update_step_reached, activate_version, update_version_config
     actor = _require_identity(request, x_assay_user)
-    intents = derive_intents(body.requirements, judge=None)
+    intents = _derive_intents_or_422(body.requirements, body.project)
     judges = {"primary": body.judge_spec} if body.judge_spec else {}
     spec_dict = intents_to_spec(body.project, intents, body.adapter_spec, judges)
     spec_dict["requirements"] = body.requirements  # persist so wizard can restore it
+    # Judge checks reference a rubric path; store the rubric alongside so the version is
+    # runnable without a disk checkout.
+    rubrics = {f"generated/rubrics/{it['id']}.yaml": yaml.safe_dump(rubric_for(it), sort_keys=False)
+               for it in intents if it["how"] == "judge"}
     if body.pipeline_version_id:
-        update_version_config(body.pipeline_version_id, spec_dict, {}, {})
+        update_version_config(body.pipeline_version_id, spec_dict, {}, rubrics)
         version_id = body.pipeline_version_id
     else:
         with session_scope() as s:
@@ -396,7 +430,7 @@ def pipeline_generate(
                     s.add(pipe)
             s.flush()
             pid = pipe.id
-        pv = create_version(pid, spec_dict, {}, {}, actor)
+        pv = create_version(pid, spec_dict, {}, rubrics, actor)
         version_id = pv.id
     update_step_reached(version_id, "review")
     activated = True

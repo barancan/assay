@@ -38,11 +38,12 @@ def _make_draft() -> PipelineVersion:
 
 # ── generator → DB ───────────────────────────────────────────────────────────
 
-def test_generate_creates_draft():
+def test_generate_creates_draft(builder_llm):
     from assay.generator.build import build_pipeline_to_db
     pv_id = build_pipeline_to_db(
         REQUIREMENTS,
         {"adapter": "mock"},
+        judge=builder_llm,
         project="gen-test",
         created_by="tester",
     )
@@ -50,18 +51,42 @@ def test_generate_creates_draft():
     assert pv.status == "draft"
     assert pv.config["project"] == "gen-test"
     assert pv.content_hash  # non-empty
+    # Traceability: suites carry the ids minted from requirements.md, never "auto".
+    refs = {s["requirement_ref"] for s in pv.config["suites"]}
+    assert refs and refs <= {f"R{n}" for n in range(1, 7)}
 
 
-def test_generate_to_db_includes_rubric_for_judge_intent():
+def test_generate_without_a_model_refuses_rather_than_guessing():
+    """No builder model and no explicit opt-in: fail loudly instead of keyword-matching."""
+    from assay.generator.build import build_pipeline_to_db
+    from assay.llm import LLMConfigError
+    with pytest.raises(LLMConfigError):
+        build_pipeline_to_db(REQUIREMENTS, {"adapter": "mock"}, project="no-model")
+
+
+def test_generate_offline_is_opt_in():
+    """--offline keeps the heuristic path working, with real requirement refs."""
+    from assay.generator.build import build_pipeline_to_db
+    pv_id = build_pipeline_to_db(REQUIREMENTS, {"adapter": "mock"}, project="offline-test",
+                                 allow_heuristic=True)
+    pv = get_version(pv_id)
+    assert pv.status == "draft"
+    refs = {s["requirement_ref"] for s in pv.config["suites"]}
+    assert "auto" not in refs
+    assert refs <= {f"R{n}" for n in range(1, 7)}
+
+
+def test_generate_to_db_includes_rubric_for_judge_intent(builder_llm):
     """When requirements mention refusal/uncertainty, a judge intent and rubric appear."""
     from assay.generator.build import build_pipeline_to_db
-    # The heuristic adds a judge intent when requirements mention 'refus' or 'uncertain'.
+    # The build model routes uncertainty/refusal wording to a graded judge check.
     req_text = "R1. The model must flag uncertainty rather than over-asserting."
     req_path = os.path.join(os.path.dirname(__file__), "tmp_req.md")
     with open(req_path, "w") as f:
         f.write(req_text)
     try:
-        pv_id = build_pipeline_to_db(req_path, {"adapter": "mock"}, project="judge-test")
+        pv_id = build_pipeline_to_db(req_path, {"adapter": "mock"}, judge=builder_llm,
+                                     project="judge-test")
     finally:
         os.unlink(req_path)
     pv = get_version(pv_id)

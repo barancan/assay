@@ -28,9 +28,11 @@
   preview: null,
   generatedChecks: [],
   permissionError: null,
+  buildError: null,
   draftSaved: false,
   hasJudge() {
-    return this.preview ? this.preview.checks.some(c => c.type === 'judge') : false;
+    return this.preview && Array.isArray(this.preview.checks)
+      ? this.preview.checks.some(c => c.type === 'judge') : false;
   },
   toggleTemplate(text) {
     if (this.requirements.includes(text)) {
@@ -39,15 +41,33 @@
       this.requirements = this.requirements ? this.requirements + '\n' + text : text;
     }
   },
+  async errorText(r) {
+    // A failed response may carry FastAPI's {detail}, or HTML, or nothing at all.
+    try {
+      const d = await r.json();
+      if (d && typeof d.detail === 'string' && d.detail) return d.detail;
+      if (d && Array.isArray(d.detail) && d.detail.length) return JSON.stringify(d.detail[0]);
+    } catch (e) {}
+    if (r.status === 401 || r.status === 403) return 'You are not signed in. Reload and sign in, then try again.';
+    return 'The server returned an error (' + r.status + ').';
+  },
   async loadPreview() {
-    const r = await fetch('/pipelines/preview', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({requirements: this.requirements, adapter: this.adapter})
-    });
-    this.preview = await r.json();
+    this.buildError = null;
+    this.preview = null;
+    try {
+      const r = await fetch('/pipelines/preview', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({requirements: this.requirements, adapter: this.adapter})
+      });
+      if (!r.ok) { this.buildError = await this.errorText(r); return; }
+      this.preview = await r.json();
+    } catch (e) {
+      this.buildError = 'Could not reach the server. Check your connection and try again.';
+    }
   },
   async generate() {
+    this.buildError = null;
     this.generating = true;
     const payload = {
       project: this.project, name: this.name, requirements: this.requirements,
@@ -56,14 +76,18 @@
     };
     if (this.resumeVersionId) payload.pipeline_version_id = this.resumeVersionId;
     if (this.resumePipelineId) payload.pipeline_id = this.resumePipelineId;
-    const r = await fetch('/pipelines/generate', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(payload)
-    });
-    const d = await r.json();
-    this.generating = false;
-    if (d.pipeline_version_id) {
+    try {
+      const r = await fetch('/pipelines/generate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      if (!r.ok) { this.buildError = await this.errorText(r); return; }
+      const d = await r.json();
+      if (!d.pipeline_version_id) {
+        this.buildError = 'The server did not return a pipeline version.';
+        return;
+      }
       this.generatedVersionId = d.pipeline_version_id;
       if (d.pipeline_id) this.resumePipelineId = d.pipeline_id;
       this.permissionError = d.permission_error || null;
@@ -76,6 +100,10 @@
       this.step = 3;
       localStorage.removeItem('assay_wizard_new');
       setTimeout(() => { window.location.href = '/pipelines'; }, 2500);
+    } catch (e) {
+      this.buildError = 'Could not reach the server. Check your connection and try again.';
+    } finally {
+      this.generating = false;
     }
   },
   async saveCheckParams(chk, params) {
@@ -233,6 +261,16 @@
           <i class="ti ti-plug" aria-hidden="true"></i> Test connection
         </button>
         <span id="connection-result" style="font-size:13px;color:var(--text-muted)"></span>
+      </div>
+    </div>
+
+    <!-- Build failure — sits directly under the fields that usually cause it -->
+    <div class="banner banner-danger" id="build-error" x-show="buildError" x-cloak
+         style="align-items:flex-start">
+      <i class="ti ti-alert-triangle" aria-hidden="true" style="margin-top:.15rem;flex-shrink:0"></i>
+      <div>
+        <p style="margin:0;font-weight:500">Couldn't build the pipeline</p>
+        <p style="margin:.15rem 0 0;font-size:13px" x-text="buildError"></p>
       </div>
     </div>
 
