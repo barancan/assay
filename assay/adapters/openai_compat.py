@@ -5,7 +5,7 @@ import os
 import time
 import requests
 from ..llm.provider import key_env_for, read_key
-from .base import ModelRequest, ModelResponse
+from .base import ModelRequest, ModelResponse, parse_structured
 
 
 class OpenAICompatAdapter:
@@ -72,21 +72,76 @@ class OpenAICompatAdapter:
         key = read_key(self.name, self.key_env)
         headers = {"Authorization": f"Bearer {key}"} if key else {}
         params = {**self.params, **req.params}
+        schema = req.metadata.get("schema")
+        timeout = params.get("timeout", 60)
+        payload = {"model": self.model, "messages": self._messages(req),
+                   "temperature": params.get("temperature", 0.0)}
+        if schema:
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "verdict", "schema": schema, "strict": True},
+            }
+        elif req.metadata.get("tools"):
+            payload["tools"] = req.metadata["tools"]
+
         t0 = time.perf_counter()
-        r = requests.post(f"{self.endpoint}/chat/completions",
-                          headers=headers,
-                          json={"model": self.model, "messages": self._messages(req),
-                                "temperature": params.get("temperature", 0.0)},
-                          timeout=params.get("timeout", 60))
+        r = requests.post(f"{self.endpoint}/chat/completions", headers=headers,
+                          json=payload, timeout=timeout)
+        mode = "json_schema" if schema else None
+        fallback_from = None
+        # vLLM and older gateways answer 400 to a json_schema response_format they do
+        # not implement. json_object is the widely supported weaker form; retry once.
+        if schema and r.status_code == 400:
+            fallback_from = _error_text(r)
+            retry = {**payload, "response_format": {"type": "json_object"}}
+            r = requests.post(f"{self.endpoint}/chat/completions", headers=headers,
+                              json=retry, timeout=timeout)
+            mode = "json_object"
         latency = (time.perf_counter() - t0) * 1000
+
         data = r.json()
-        text = data.get("choices", [{}])[0].get("message", {}).get("content")
-        return ModelResponse(text=text, raw=data, json=_maybe_json(text or ""),
-                             latency_ms=latency, usage=data.get("usage", {}),
-                             status="ok" if r.ok else "error")
+        raw = dict(data) if isinstance(data, dict) else {"body": data}
+        if mode:
+            # Left in raw so a human debugging a weird verdict can see which form
+            # of structured output the server actually accepted.
+            raw["_assay_structured_mode"] = mode
+            if fallback_from:
+                raw["_assay_structured_fallback_from"] = fallback_from[:300]
+        text = _content(raw)
+        if not schema:
+            return ModelResponse(text=text, raw=raw, json=_maybe_json(text or ""),
+                                 latency_ms=latency, usage=raw.get("usage", {}),
+                                 status="ok" if r.ok else "error")
+        if not r.ok:
+            return ModelResponse(text=text, raw=raw, latency_ms=latency,
+                                 usage=raw.get("usage", {}), status="error",
+                                 error=f"openai_compat request failed (HTTP {r.status_code})")
+        parsed, err = parse_structured(text, schema, provider="openai_compat")
+        return ModelResponse(text=text, raw=raw, json=parsed, latency_ms=latency,
+                             usage=raw.get("usage", {}),
+                             status="error" if err else "ok", error=err)
 
     def complete(self, messages, *, schema=None, tools=None, params=None) -> ModelResponse:
-        return self.invoke(ModelRequest(input={"messages": messages}, params=params or {}))
+        return self.invoke(ModelRequest(input={"messages": messages}, params=params or {},
+                                        metadata={"schema": schema, "tools": tools}))
+
+
+def _content(data: dict):
+    choices = data.get("choices") or [{}]
+    first = choices[0] if isinstance(choices[0], dict) else {}
+    message = first.get("message") or {}
+    return message.get("content") if isinstance(message, dict) else None
+
+
+def _error_text(r) -> str:
+    try:
+        body = r.json()
+    except ValueError:
+        return str(getattr(r, "text", ""))[:300]
+    err = body.get("error") if isinstance(body, dict) else None
+    if isinstance(err, dict):
+        return str(err.get("message") or err)
+    return str(err or body)
 
 
 def _maybe_json(text: str):

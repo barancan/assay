@@ -4,7 +4,7 @@ import json
 import time
 import requests
 from ..llm.provider import key_env_for
-from .base import ModelRequest, ModelResponse
+from .base import ModelRequest, ModelResponse, parse_structured
 
 
 class OllamaAdapter:
@@ -43,22 +43,43 @@ class OllamaAdapter:
     def invoke(self, req: ModelRequest) -> ModelResponse:
         prompt = req.input.get("prompt") or json.dumps(req.input)
         params = {**self.params, **req.params}
+        schema = req.metadata.get("schema")
+        timeout = params.get("timeout", 120)
         payload = {"model": self.model, "prompt": prompt, "stream": False}
         # The judge sends its instructions as params["system"]; ollama has a field for it.
         if params.get("system"):
             payload["system"] = params["system"]
+        if schema:
+            payload["format"] = schema
         t0 = time.perf_counter()
-        r = requests.post(f"{self.endpoint}/api/generate", json=payload,
-                          timeout=params.get("timeout", 120))
+        r = requests.post(f"{self.endpoint}/api/generate", json=payload, timeout=timeout)
+        mode = "schema" if schema else None
+        # Schema-valued `format` landed in ollama 0.5; before that the field only
+        # accepted the string "json" and anything else is rejected outright.
+        if schema and r.status_code == 400:
+            retry = {**payload, "format": "json"}
+            r = requests.post(f"{self.endpoint}/api/generate", json=retry, timeout=timeout)
+            mode = "json"
         latency = (time.perf_counter() - t0) * 1000
         data = r.json()
-        text = data.get("response")
-        return ModelResponse(text=text, raw=data, json=_maybe_json(text or ""),
-                             latency_ms=latency, status="ok" if r.ok else "error")
+        raw = dict(data) if isinstance(data, dict) else {"body": data}
+        if mode:
+            raw["_assay_structured_mode"] = mode
+        text = raw.get("response")
+        if not schema:
+            return ModelResponse(text=text, raw=raw, json=_maybe_json(text or ""),
+                                 latency_ms=latency, status="ok" if r.ok else "error")
+        if not r.ok:
+            return ModelResponse(text=text, raw=raw, latency_ms=latency, status="error",
+                                 error=f"ollama request failed (HTTP {r.status_code})")
+        parsed, err = parse_structured(text, schema, provider="ollama")
+        return ModelResponse(text=text, raw=raw, json=parsed, latency_ms=latency,
+                             status="error" if err else "ok", error=err)
 
     def complete(self, messages, *, schema=None, tools=None, params=None) -> ModelResponse:
         prompt = "\n".join(m.get("content", "") for m in messages)
-        return self.invoke(ModelRequest(input={"prompt": prompt}, params=params or {}))
+        return self.invoke(ModelRequest(input={"prompt": prompt}, params=params or {},
+                                        metadata={"schema": schema, "tools": tools}))
 
 
 def _maybe_json(text: str):
