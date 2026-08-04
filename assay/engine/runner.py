@@ -20,6 +20,22 @@ from ..store import session_scope
 from ..store.models import Run, CaseResult, TargetModel, Report, StateTransition, PipelineVersion
 
 
+def _interface_hash(target) -> str | None:
+    """Hash of the interface description this target was built against, when there is one.
+
+    Recorded on the run's TargetModel so a report can say which request/response shape
+    the pipeline assumed — an interface that changed under a pipeline is exactly the
+    thing that makes yesterday's green run meaningless.
+    """
+    if not getattr(target, "import_", None):
+        return None
+    from ..generator.interface import parse_interface
+    try:
+        return parse_interface(target.import_).hash or None
+    except (OSError, ValueError):
+        return None
+
+
 def _git_commit() -> str | None:
     try:
         return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"],
@@ -153,7 +169,8 @@ def _setup_run(
         with session_scope() as s:
             tm = TargetModel(project=spec.project, adapter=spec.target.adapter,
                              model=spec.target.model, endpoint=spec.target.endpoint,
-                             params=spec.target.params)
+                             params=spec.target.params,
+                             interface_hash=_interface_hash(spec.target))
             s.add(tm)
             s.flush()
             run = Run(project=spec.project, spec_hash=spec_hash(spec),

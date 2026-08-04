@@ -21,6 +21,7 @@
   model: {{ (resume_data.model if resume_data else '') | tojson }},
   endpoint: {{ (resume_data.endpoint if resume_data else '') | tojson }},
   key_env: {{ (resume_data.key_env if resume_data else '') | tojson }},
+  interfaceFile: {{ (resume_data.interface_file if resume_data else '') | tojson }},
   resumeVersionId: {{ (resume_data.version_id if resume_data else none) | tojson }},
   resumePipelineId: {{ (resume_data.pipeline_id if resume_data else none) | tojson }},
   judgeAdapter: {{ judge_adapter | tojson }},
@@ -30,6 +31,18 @@
   permissionError: null,
   buildError: null,
   draftSaved: false,
+  distinctChecks() {
+    // One generated check now runs against several cases, so the persisted list has a
+    // row per (case, check). Collapse them or the review step reports three times the
+    // checks the preview promised.
+    const byCheck = new Map();
+    for (const c of this.generatedChecks) {
+      const key = [c.type, c.key || c.uses || '', c.assertion || ''].join('|');
+      if (byCheck.has(key)) byCheck.get(key).cases += 1;
+      else byCheck.set(key, Object.assign({}, c, {cases: 1}));
+    }
+    return Array.from(byCheck.values());
+  },
   hasJudge() {
     return this.preview && Array.isArray(this.preview.checks)
       ? this.preview.checks.some(c => c.type === 'judge') : false;
@@ -72,7 +85,10 @@
     const payload = {
       project: this.project, name: this.name, requirements: this.requirements,
       adapter_spec: {adapter: this.adapter, model: this.model || null,
-                     endpoint: this.endpoint || null, key_env: this.key_env || null}
+                     endpoint: this.endpoint || null, key_env: this.key_env || null,
+                     // `import` is a declared TargetSpec field; anything undeclared is
+                     // rejected by the spec model rather than silently dropped.
+                     import: this.interfaceFile.trim() || null}
     };
     if (this.resumeVersionId) payload.pipeline_version_id = this.resumeVersionId;
     if (this.resumePipelineId) payload.pipeline_id = this.resumePipelineId;
@@ -133,6 +149,7 @@
         requirements: this.requirements, project: this.project, name: this.name,
         adapter: this.adapter, model: this.model,
         endpoint: this.endpoint, key_env: this.key_env,
+        interfaceFile: this.interfaceFile,
       }));
     } catch(e) {}
   },
@@ -148,9 +165,11 @@
         if (d.model !== undefined) this.model = d.model;
         if (d.endpoint !== undefined) this.endpoint = d.endpoint;
         if (d.key_env !== undefined) this.key_env = d.key_env;
+        if (d.interfaceFile !== undefined) this.interfaceFile = d.interfaceFile;
       }
     } catch(e) {}
-    ['requirements','project','name','adapter','model','endpoint','key_env'].forEach(k => {
+    ['requirements','project','name','adapter','model','endpoint','key_env',
+     'interfaceFile'].forEach(k => {
       this.$watch(k, () => this._persist());
     });
   }
@@ -398,6 +417,7 @@
         <div><dt>Adapter</dt><dd x-text="adapter"></dd></div>
         <div x-show="model"><dt>Model</dt><dd x-text="model"></dd></div>
         <div x-show="endpoint"><dt>Endpoint</dt><dd x-text="endpoint" style="word-break:break-all"></dd></div>
+        <div x-show="interfaceFile"><dt>Interface</dt><dd x-text="interfaceFile" style="word-break:break-all"></dd></div>
       </dl>
       <div style="margin-top:.85rem;padding-top:.75rem;border-top:1px solid var(--border)">
         <p style="font-size:12px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;
@@ -413,12 +433,12 @@
       <h2 style="margin:0 0 .75rem;font-size:15px">
         Checks
         <span style="font-weight:400;color:var(--text-muted);font-size:13px"
-              x-text="'(' + (generatedChecks.length || (preview ? preview.checks.length : 0)) + ' total)'"></span>
+              x-text="'(' + (distinctChecks().length || (preview ? preview.checks.length : 0)) + ' total)'"></span>
       </h2>
       <!-- Persisted check list (read-only) -->
       <template x-if="generatedChecks.length">
         <div>
-          <template x-for="chk in generatedChecks" :key="chk.suite_id + '/' + chk.case_id + '/' + chk.check_index">
+          <template x-for="chk in distinctChecks()" :key="chk.suite_id + '/' + chk.case_id + '/' + chk.check_index">
             <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;
                         padding:.4rem 0;border-bottom:1px solid var(--border);font-size:13px">
               <span class="badge"
@@ -429,6 +449,8 @@
                     style="flex-shrink:0;font-size:11px"
                     x-text="chk.determinism === 'stochastic' ? 'Stochastic' : 'Deterministic'"></span>
               <span style="color:var(--text-primary)" x-text="chk.assertion || chk.case_id"></span>
+              <span style="margin-left:auto;font-size:11px;color:var(--text-muted)"
+                    x-text="chk.cases + (chk.cases === 1 ? ' case' : ' cases')"></span>
             </div>
           </template>
         </div>
