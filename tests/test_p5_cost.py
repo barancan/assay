@@ -577,13 +577,6 @@ def test_a_generated_check_cannot_inject_cost_into_the_run_total():
     assert _judge_spend([forged]) == {"tokens": 0, "usd": 0.0}
 
 
-@pytest.mark.xfail(
-    reason="assay/server/app.py::_report_ctx projects CaseResult onto a fixed dict and "
-           "does not yet forward input_tokens/output_tokens/judge_tokens/cost_usd, so "
-           "the page renders 'unknown' for every case. The template is already correct "
-           "(see test_report_page_renders_unknown_distinctly_from_zero); this passes as "
-           "soon as those four keys are added to the case_results projection.",
-    strict=False)
 def test_report_page_shows_real_per_case_cost_end_to_end(_tmp_db):
     """The rendered page should show the cost that is actually in the database."""
     pytest.importorskip("fastapi")
