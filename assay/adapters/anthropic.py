@@ -2,7 +2,7 @@
 from __future__ import annotations
 import json
 import time
-from ..llm.provider import LLMConfigError, key_env_for, read_key
+from ..llm.provider import LLMConfigError, credential_status, key_env_for, read_key
 from .base import ModelRequest, ModelResponse
 
 
@@ -31,12 +31,22 @@ class AnthropicAdapter:
 
     def ping(self) -> dict:
         env_var = key_env_for(self.name, self.key_env)
+        status = credential_status(self.name, self.key_env)
+        if status["requires_key"] and not status["configured"]:
+            # No key at all: nothing was contacted, so reachability is unknown.
+            # Checked before the SDK import so the message names the variable.
+            return {"ok": False, "reachable": False, "authenticated": False,
+                    "latency_ms": None, "error": f"{env_var} is not set",
+                    "env_var": env_var}
         t0 = time.perf_counter()
         try:
             client = self._client()
         except LLMConfigError as exc:
-            # No key at all: nothing was contacted, so reachability is unknown.
             return {"ok": False, "reachable": False, "authenticated": False,
+                    "latency_ms": None, "error": str(exc), "env_var": env_var}
+        except RuntimeError as exc:
+            # SDK not installed -- a local problem, not an unreachable service.
+            return {"ok": False, "reachable": False, "authenticated": None,
                     "latency_ms": None, "error": str(exc), "env_var": env_var}
         try:
             client.models.list()
