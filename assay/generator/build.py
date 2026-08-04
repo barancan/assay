@@ -348,6 +348,53 @@ def rubric_for(intent: dict, llm=None, *, interface=None) -> dict:
     return generate_rubric(intent, llm, interface=interface)
 
 
+def generated_sources_for(intents: list[dict], iface, llm=None) -> tuple[dict, dict]:
+    """Write a Python check for every `generated` intent. Returns (sources, build_meta).
+
+    Intents that codegen cannot serve are **degraded in place** to judge intents, so the
+    spec assembly and rubric generation that follow treat them as judge checks and the
+    assertion still gets tested -- semantically rather than mechanically. Every
+    degradation is recorded in build_meta.codegen_failures with the attempts and the
+    exact errors, because an intent that silently changed kind is the failure mode this
+    whole phase exists to make visible.
+
+    `llm is None` is the `--offline` path: there is no model, so there is no codegen,
+    and every generated intent degrades with that recorded as the reason.
+    """
+    from .codegen import generate_check
+
+    sources: dict[str, str] = {}
+    dry_runs: dict[str, dict] = {}
+    failures: list[dict] = []
+
+    for it in intents:
+        if it.get("how") != "generated":
+            continue
+        if llm is None:
+            result = None
+            errors = ["no builder model available, so no check could be written "
+                      "(the offline path has no model)"]
+            attempts = 0
+        else:
+            result = generate_check(it, iface, llm)
+            errors, attempts = result.errors, result.attempts
+        if result is not None and result.ok:
+            sources[result.path] = result.source
+            dry_runs[result.path] = result.dry_run
+            continue
+        failures.append({"intent_id": it["id"], "assertion": it.get("assertion", ""),
+                         "attempts": attempts, "errors": errors})
+        it["how"] = "judge"
+        it["degraded_from"] = "generated"
+
+    meta: dict = {}
+    if dry_runs:
+        meta["codegen"] = dry_runs
+    if failures:
+        meta["codegen_failures"] = failures
+    return sources, meta
+
+
 def cases_for_intents(intents: list[dict], iface, judge=None, *,
                       dataset: str | None = None, n: int = 3) -> dict[str, list[dict]]:
     """Inputs for every intent: bound to a dataset when one is given, generated otherwise.
@@ -401,17 +448,19 @@ def build_pipeline_to_db(
     intents = derive_intents(requirements, judge, allow_heuristic=allow_heuristic)
     iface = resolve_interface(interface_path, target)
     cases = cases_for_intents(intents, iface, judge, dataset=dataset)
+    # Before spec assembly: codegen may degrade an intent to `judge`, and both the spec
+    # and the rubrics below have to see the kind it ended up as, not the one it asked for.
+    generated_sources, build_meta = generated_sources_for(intents, iface, judge)
     spec_dict = intents_to_spec(project, intents, target, judges or {},
                                 iface=iface, cases_by_intent=cases)
+    if build_meta:
+        spec_dict["build_meta"] = build_meta
 
     rubrics: dict[str, str] = {}
     for it in intents:
         if it["how"] == "judge":
             path = f"generated/rubrics/{it['id']}.yaml"
             rubrics[path] = yaml.safe_dump(rubric_for(it, judge), sort_keys=False)
-
-    # generated_sources is empty in v0 — codegen not yet implemented.
-    generated_sources: dict[str, str] = {}
 
     with session_scope() as s:
         pipeline = s.query(Pipeline).filter_by(project=project, name=project).one_or_none()
@@ -433,14 +482,19 @@ def build_pipeline(requirements_path: str, target: dict, out_dir: str,
     intents = derive_intents(requirements, judge, allow_heuristic=allow_heuristic)
     iface = resolve_interface(interface_path, target)
     cases = cases_for_intents(intents, iface, judge, dataset=dataset)
+    generated_sources, build_meta = generated_sources_for(intents, iface, judge)
     spec = intents_to_spec(project, intents, target, judges or {},
                            iface=iface, cases_by_intent=cases)
+    if build_meta:
+        spec["build_meta"] = build_meta
     out = Path(out_dir)
     (out / "generated" / "rubrics").mkdir(parents=True, exist_ok=True)
     (out / "generated" / "checks").mkdir(parents=True, exist_ok=True)
     import yaml
     spec_path = out / "assay.yaml"
     spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+    for rel, source in generated_sources.items():
+        (out / rel).write_text(source)
     # write rubric stubs for judge intents
     for it in intents:
         if it["how"] == "judge":
