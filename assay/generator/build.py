@@ -280,16 +280,16 @@ def intents_to_spec(project: str, intents: list[dict], target: dict,
     }
 
 
-def rubric_for(intent: dict) -> dict:
-    return {
-        "judge": "primary",
-        "dimensions": [{
-            "id": "judgment",
-            "question": intent["assertion"],
-            "scale": {0: "fails", 1: "partial", 2: "meets"},
-            "min_score": 2,
-        }],
-    }
+def rubric_for(intent: dict, llm=None, *, interface=None) -> dict:
+    """Rubric for a judge intent: model-authored when a builder LLM is available.
+
+    Without one -- the `--offline` path, and any caller that has no model -- this is the
+    deterministic fallback rather than a silent one-dimension stub.
+    """
+    from .rubricgen import fallback_rubric, generate_rubric
+    if llm is None:
+        return fallback_rubric(intent)
+    return generate_rubric(intent, llm, interface=interface)
 
 
 def build_pipeline_to_db(
@@ -319,7 +319,7 @@ def build_pipeline_to_db(
     for it in intents:
         if it["how"] == "judge":
             path = f"generated/rubrics/{it['id']}.yaml"
-            rubrics[path] = yaml.safe_dump(rubric_for(it), sort_keys=False)
+            rubrics[path] = yaml.safe_dump(rubric_for(it, judge), sort_keys=False)
 
     # generated_sources is empty in v0 — codegen not yet implemented.
     generated_sources: dict[str, str] = {}
@@ -352,5 +352,5 @@ def build_pipeline(requirements_path: str, target: dict, out_dir: str,
     for it in intents:
         if it["how"] == "judge":
             (out / "generated" / "rubrics" / f"{it['id']}.yaml").write_text(
-                yaml.safe_dump(rubric_for(it), sort_keys=False))
+                yaml.safe_dump(rubric_for(it, judge), sort_keys=False))
     return str(spec_path)
