@@ -38,7 +38,11 @@ def generate(
     target_import: str = typer.Option(None, "--import"),
     request: str = typer.Option(None),
     out: str = typer.Option("."),
-    judge: str = typer.Option(None, help="provider:model for LLM-assisted build"),
+    judge: str = typer.Option(None, help="provider:model for the build model, "
+                                         "e.g. anthropic:claude-haiku-4-5-20251001"),
+    offline: bool = typer.Option(False, "--offline",
+                                 help="derive intents with the offline keyword heuristic "
+                                      "instead of a model (no API key needed)"),
     project: str = typer.Option("project"),
     to_db: bool = typer.Option(False, "--to-db",
                                help="store pipeline in DB instead of writing files to disk"),
@@ -46,37 +50,79 @@ def generate(
 ):
     """Build the pipeline from requirements + target interface.
 
-    Default: emit assay.yaml + generated/ to disk (eval-as-code, commit to git).
+    Uses the configured build model unless --offline is given. Default: emit
+    assay.yaml + generated/ to disk (eval-as-code, commit to git).
     Use --to-db to store as a draft PipelineVersion in the DB instead.
     """
-    from .adapters import get_judge_provider
-    from .spec.models import JudgeSpec
     target = {"adapter": target_adapter}
     if target_import:
         target["import"] = target_import
     if request:
         target["request"] = request
-    judge_obj, judges = None, None
-    if judge:
-        prov, model = judge.split(":", 1)
-        judge_obj = get_judge_provider(JudgeSpec(provider=prov, model=model))
-        judges = {"primary": {"provider": prov, "model": model}}
+    judge_obj, judges = _resolve_build_model(judge, offline, project)
 
     if to_db:
         from .store.db import init_db
         from .generator.build import build_pipeline_to_db
         init_db()
         pv_id = build_pipeline_to_db(requirements, target, out, judge=judge_obj,
-                                     judges=judges, project=project, created_by=by)
+                                     judges=judges, project=project, created_by=by,
+                                     allow_heuristic=offline)
         console.print(f"[green]pipeline version {pv_id} created (draft)[/]")
         console.print("[yellow]activate it before running: assay pipeline activate "
                       f"{pv_id} --by REVIEWER[/]")
     else:
         from .generator import build_pipeline
         path = build_pipeline(requirements, target, out, judge=judge_obj,
-                              judges=judges, project=project)
+                              judges=judges, project=project, allow_heuristic=offline)
         console.print(f"[green]pipeline written[/] {path}")
         console.print("[yellow]review generated/ before running in production[/]")
+
+
+def _resolve_build_model(judge: str | None, offline: bool, project: str):
+    """Return (provider, judges-block) for `assay generate`.
+
+    --offline is the only way to build without a model; everything else resolves a real
+    one and fails with the missing variable's name rather than degrading silently.
+    """
+    from .llm.provider import LLMConfigError, credential_status, resolve_builder_llm
+    if offline:
+        if judge:
+            console.print("[red]--offline and --judge are mutually exclusive[/]")
+            raise typer.Exit(1)
+        console.print("[yellow]offline build: intents come from the keyword heuristic, "
+                      "not a model[/]")
+        return None, None
+    if judge:
+        if ":" not in judge:
+            console.print(f"[red]--judge must be provider:model[/] — got {judge!r}. "
+                          "Example: --judge anthropic:claude-haiku-4-5-20251001")
+            raise typer.Exit(1)
+        prov, model = judge.split(":", 1)
+        prov, model = prov.strip(), model.strip()
+        if not prov or not model:
+            console.print(f"[red]--judge must be provider:model[/] — got {judge!r}. "
+                          "Example: --judge anthropic:claude-haiku-4-5-20251001")
+            raise typer.Exit(1)
+        status = credential_status(prov)
+        if not status["known"]:
+            console.print(f"[red]unknown provider[/] {prov!r}")
+            raise typer.Exit(1)
+        if not status["configured"]:
+            console.print(f"[red]{prov} is not configured[/] — set ${status['env_var']} "
+                          "in the environment, or build with --offline")
+            raise typer.Exit(1)
+        from .adapters import get_judge_provider
+        from .spec.models import JudgeSpec
+        return (get_judge_provider(JudgeSpec(provider=prov, model=model)),
+                {"primary": {"provider": prov, "model": model}})
+    try:
+        return resolve_builder_llm(project), None
+    except LLMConfigError as e:
+        console.print(f"[red]{e}[/]")
+        console.print("[yellow]set the variable above, pass --judge provider:model, "
+                      "or build with --offline[/]")
+        raise typer.Exit(1)
 
 
 @app.command()

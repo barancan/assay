@@ -7,9 +7,9 @@ generated function, or LLM judge), runs it, and produces a saved, reviewable
 report that a named human must sign off before it is considered production ready.
 
 > **Status: pre-1.0, and the builder half is not finished.** The runner — execute,
-> review, adjudicate, approve, audit — works end to end. The builder currently
-> derives test intents with an offline heuristic unless you pass `--judge` on the
-> CLI, and **LLM codegen is not implemented yet**. Read
+> review, adjudicate, approve, audit — works end to end. The builder derives test
+> intents with a real model on every path (`assay generate --offline` is the only
+> way to get the old keyword heuristic), but **LLM codegen is not implemented yet**. Read
 > [`docs/STATUS.md`](docs/STATUS.md) before you rely on anything below; every
 > capability is marked built, partial, or planned.
 
@@ -124,7 +124,8 @@ What that looks like in the current build:
 
 | Stage | Today |
 |---|---|
-| Derive intents | Real LLM when you pass `--judge` to `assay generate`; otherwise an offline keyword heuristic. **The web UI always uses the heuristic.** |
+| Derive intents | Real LLM on every path — the web UI and `assay generate` both resolve the configured build model, and fail with the missing variable's name rather than degrading. `assay generate --offline` opts back into the keyword heuristic |
+| Requirement traceability | Requirements are split into `R1…Rn` (`generator/ingest.py`); every intent must cite one, and each becomes its own suite so the coverage matrix has real buckets |
 | Route deterministic vs. judge | Decided by the same call; no rationale is recorded |
 | Template checks | Working — 11 primitives |
 | Generated functions | **Not implemented.** Routing an intent to `generated` produces a spec entry with no source behind it |

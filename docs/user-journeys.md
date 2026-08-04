@@ -79,8 +79,9 @@ Target: zero state routes into [J3](#j3--create-a-project) and surfaces
 | 4 | Set the **builder** model separately from the judge model | Settings → Providers card | `POST /settings/builder` | `llm.provider.resolve_builder_llm` | `WorkspaceSetting` | **MISSING** (P0/P1) — the stored judge setting is used only at eval time, never for building |
 | 5 | Name a per-target key env var | wizard step 2 `key_env` field, `_adapter_fields.html:36` | `POST /pipelines/generate` | `TargetSpec.key_env` | persisted in `PipelineVersion.config.target` | **MISSING** — the field is collected (`server/app.py:307`) and silently dropped: `TargetSpec` (`spec/models.py:7-17`) has no such field and pydantic ignores extras, while `adapters/openai_compat.py:44` hardcodes `OPENAI_API_KEY` (P0) |
 
-**J2-F1 — no key set, builder clicks Generate.** Must return HTTP 422 naming the exact env var,
-rendered as an actionable banner. Today it silently falls through to heuristic output (P1).
+**J2-F1 — no key set, builder clicks Generate.** Returns HTTP 422 naming the exact env var,
+rendered in the step-2 `.banner-danger` next to the fields that need fixing. The wizard stays
+on step 2 and nothing is persisted.
 
 **Credential policy:** API keys live in the environment only, referenced by name (`key_env`).
 They are never written to the database, never rendered back to the browser, and never included
@@ -105,8 +106,8 @@ in an exported report.
 | 1 | Open the wizard | `pipeline_new.html`, Alpine `step: 1` | `GET /pipelines/new` | `server/app.py:265` | — | **BUILT** |
 | 2 | Write requirements freehand | step-1 textarea | — | — | localStorage draft (survives refresh) | **BUILT** |
 | 3 | Add a metric from the catalogue | metric chips, `pipeline_new.html:171` | — | `_METRIC_CATALOGUE`, `server/app.py:~240` | — | **BUILT** |
-| 4 | See intents previewed from the requirements | step-1 preview list | `POST /pipelines/preview` | `generator.build.derive_intents:67` | — | **PARTIAL** — `judge=None` is hardcoded at `server/app.py:344`, so this is always the offline keyword heuristic (P1) |
-| 5 | See each intent traced to a numbered requirement | `R1…Rn` chips in the preview | `POST /pipelines/preview` | `generator.ingest.split_requirements` | — | **MISSING** — every heuristic intent is stamped `requirement_ref: "auto"` (`generator/build.py:41-62`), collapsing the coverage matrix into one bucket (P1) |
+| 4 | See intents previewed from the requirements | step-1 preview list | `POST /pipelines/preview` | `generator.build.derive_intents` | — | **BUILT** — the route resolves the workspace build model; an unconfigured or failing model becomes a 422 rendered in the step-2 danger banner |
+| 5 | See each intent traced to a numbered requirement | `R1…Rn` in the review page and coverage matrix | `POST /pipelines/preview` | `generator.ingest.split_requirements` | — | **PARTIAL** — refs are real end to end (one suite per requirement), but the step-1 preview list does not yet show the ref per check |
 | 6 | Save and resume later | "Save draft" | `POST /pipelines/save-draft` | `pipeline.service.save_draft_from_requirements:196` | draft `PipelineVersion`, `step_reached` | **BUILT** |
 
 ---
@@ -132,7 +133,7 @@ The product's core moment. **Success:** a draft version whose checks a builder w
 | # | Action | UI touchpoint | Route | Business logic | State effect | Status |
 |---|---|---|---|---|---|---|
 | 1 | Click Generate | step-2 primary button, `pipeline_new.html:310` | `POST /pipelines/generate` | `server/app.py:367` | — | **BUILT** |
-| 2 | Derive intents with a real LLM | progress state | — | `generator.build.derive_intents:67` | — | **MISSING** — `judge=None` hardcoded at `server/app.py:377` (P1) |
+| 2 | Derive intents with a real LLM | progress state | — | `generator.build.derive_intents` | — | **BUILT** — `_derive_intents_or_422` resolves the build model; nothing is persisted when the build fails |
 | 3 | Route each intent → template / generated / judge | — | — | `generator.build.intents_to_spec:81` | `PipelineVersion.config` | **PARTIAL** — routing is a field on the single LLM call; no rationale captured, no per-intent override surface |
 | 4 | Materialise **template** checks | — | — | `checks/library.py:125` | config | **BUILT** — 11 of the design's 16 primitives |
 | 5 | Materialise **generated** checks | — | — | `generator.codegen.generate_check` | `PipelineVersion.generated_sources` | **MISSING** — `generator/build.py:144` hardcodes `generated_sources = {}`, so a `generated` intent produces a spec pointing at a file that is never written and the run dies at `sandbox/runner.py:103` (P4) |
@@ -140,7 +141,7 @@ The product's core moment. **Success:** a draft version whose checks a builder w
 | 7 | Generate concrete test cases | — | — | `generator.casegen.generate_cases` | config | **MISSING** — every case is `"input": {}` (`generator/build.py:98`) (P3) |
 | 8 | Auto-activate and land on Review | step 3 / `HX-Redirect` | — | `pipeline.service.activate_version:164` | version `status=active` | **BUILT** |
 
-**J6-F1 — no credentials:** 422 naming the env var, never a silent heuristic fallback (P1).
+**J6-F1 — no credentials:** 422 naming the env var, never a silent heuristic fallback — **BUILT**.
 **J6-F2 — codegen fails validation after retries:** the intent degrades to a judge check, with
 the reason recorded in `config["build_meta"]` and shown in review (P4).
 **J6-F3 — provider 429 / timeout:** the partial draft is saved and resumable; never a lost

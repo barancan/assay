@@ -13,16 +13,16 @@ disagrees with this page, this page is right and the other is a bug.
 | **Planned** | Designed, not implemented |
 
 > **The headline:** the *runner* — execute, review, adjudicate, approve, audit — is
-> production-shaped. The *builder* — requirements → intents → checks — is a v0 heuristic.
-> The web UI never calls an LLM, and LLM codegen does not exist. Assay is not yet
-> market-ready; see [Roadmap](#roadmap) for the phases that close the gap.
+> production-shaped. The *builder* — requirements → intents → checks — now calls a real
+> model on every path, but LLM codegen does not exist and case inputs are still empty.
+> Assay is not yet market-ready; see [Roadmap](#roadmap) for the phases that close the gap.
 
 ## Builder (requirements → pipeline)
 
 | Capability | Status | Note |
 |---|---|---|
-| Parse requirements into intents | **Partial** | Real LLM path exists in the CLI via `--judge`. The web UI hardcodes `judge=None` (`server/app.py:344`, `:377`), so every UI build uses the offline keyword heuristic |
-| Requirement traceability (`R1…Rn`) | **Planned** | Heuristic intents are all stamped `requirement_ref: "auto"` (`generator/build.py:41-62`) |
+| Parse requirements into intents | **Built** | Both the web UI and the CLI resolve the configured build model (`llm.provider.resolve_builder_llm`) and call it. Malformed or unconfigured means a 422 naming the variable to set, never a silent fallback. `assay generate --offline` is the explicit opt-in to the keyword heuristic |
+| Requirement traceability (`R1…Rn`) | **Built** | `generator/ingest.py` splits requirements into `R1…Rn`; the prompt carries those ids, every returned `requirement_ref` is resolved against them, and `intents_to_spec` emits one suite per requirement |
 | Route deterministic vs. judge | **Partial** | Decided inside the single intent call; no rationale is persisted, no per-intent override |
 | Bind to a template check | **Built** | 11 primitives (`checks/library.py`) |
 | Generate a Python check (codegen) | **Planned** | `generator/build.py:144` hardcodes `generated_sources = {}`. A `generated` intent produces a spec pointing at a file that is never written |
