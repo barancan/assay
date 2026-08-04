@@ -4,7 +4,7 @@ What is actually built, what is partial, and what is still planned. This file is
 source of truth for capability claims. If the README, the design doc, or a docstring
 disagrees with this page, this page is right and the other is a bug.
 
-**Last verified:** 2026-08-04 against `claude/real-llm-foundation`. 273 tests passing, with zero API keys set.
+**Last verified:** 2026-08-04 against `claude/real-judging-and-grounding`. 333 tests passing, with zero API keys set.
 
 | Marker | Meaning |
 |---|---|
@@ -28,7 +28,7 @@ disagrees with this page, this page is right and the other is a bug.
 | Generate a Python check (codegen) | **Planned** | `generator/build.py:144` hardcodes `generated_sources = {}`. A `generated` intent produces a spec pointing at a file that is never written |
 | Generate a judge rubric | **Partial** | A fixed one-dimension YAML synthesised from the assertion string; no anchored dimensions, no output schema, no evidence requirement |
 | Generate test cases | **Planned** | Every case is `"input": {}` (`generator/build.py:98`) |
-| Ground on the target interface | **Planned** | The Postman/OpenAPI file is never parsed at build time, so checks cannot reference real response fields |
+| Ground on the target interface | **Partial** | `generator/interface.py` parses Postman collections, OpenAPI 3 (JSON or YAML, local `$ref`s resolved) and MCP tool schemas into request fields, a response schema and JSONPath response paths, and `sample_response` renders a schema-valid sample for codegen to dry-run against. Detection is by content, and anything unreadable stays ungrounded instead of raising. Not yet consumed by case generation or codegen |
 | Golden dataset binding | **Planned** | `datasets/` is scaffolded by `cli.py:25` and never read |
 | Regenerate a single check | **Partial** | Emits a contract-correct scaffold that fails explicitly until codegen lands |
 
@@ -37,7 +37,7 @@ disagrees with this page, this page is right and the other is a bug.
 | Adapter | Status | Note |
 |---|---|---|
 | `mock` | **Built** | For tests and the offline example only |
-| `rest` | **Partial** | Postman collection import, variable substitution, bearer auth. **OpenAPI import is not implemented** — an OpenAPI file fails in `json.loads` (`adapters/rest.py:37`) |
+| `rest` | **Built** | Imports Postman collections (nested folders, named requests, disabled headers dropped, collection variables and auth) and OpenAPI 3 documents in JSON or YAML, through the same parser the builder grounds on (`generator/interface.py`). Variable substitution, bearer auth |
 | `anthropic` | **Built** | |
 | `openai_compat` | **Built** | Honours a per-target `key_env`; `key_env: ""` opts a keyless local server (vLLM, LM Studio) out of auth entirely |
 | `ollama` | **Built** | |
@@ -133,7 +133,7 @@ at the end of `assay run`.
 | Postgres via `ASSAY_DB_URL` | **Partial** | No code change is needed, and migrations are now dialect-aware, but the Postgres path is not exercised in CI |
 | Schema migrations | **Partial** | Hand-rolled additive `ALTER TABLE` via `store/db.py:_add_columns`; no Alembic |
 | Cases as first-class rows | **Planned** | Cases live as JSON inside `PipelineVersion.config` |
-| `TargetModel.interface_hash` | **Planned** | The column exists and is never populated |
+| `TargetModel.interface_hash` | **Planned** | `parse_interface` computes the hash (`Interface.hash`), but nothing writes it onto the row yet |
 
 ## Roadmap
 
@@ -145,7 +145,7 @@ Phases referenced from [`user-journeys.md`](user-journeys.md). Market-ready mini
 | **P0** | Credential and provider foundation: one resolution path for which model, which key, and whether it is configured |
 | **P1** | A real LLM in every build path, including the web UI. No silent heuristic fallback |
 | **P2** | Real judging: structured output, evidence enforcement, self-consistency, real rubric generation |
-| **P3** | Interface grounding and case generation, including dataset binding |
+| **P3** | Interface grounding and case generation, including dataset binding. Parsing is in (`generator/interface.py`); the builder does not consume it yet |
 | **P4** | Real codegen with validation, sandbox dry-run, and a repair loop |
 | **P5** | Token and cost capture |
 | **P6** | Retire the mock default — a fresh install with no keys must not be able to produce a green report |

@@ -1,7 +1,8 @@
-"""Generic REST target with optional Postman-collection import.
+"""Generic REST target with Postman-collection or OpenAPI import.
 
-OpenAPI import is designed but not implemented -- `import_` is parsed as JSON, so an
-OpenAPI YAML file raises. See docs/STATUS.md.
+The file is read by `generator/interface.py`, which is also what the builder grounds on:
+one parser, so the request the adapter sends and the request the builder reasons about
+cannot drift apart. Format is decided by content, not by extension.
 """
 from __future__ import annotations
 import json
@@ -36,25 +37,45 @@ class RestAdapter:
         self.auth = auth or {}
         self.template = {"method": "POST", "url": endpoint, "headers": {}, "body": None}
         if import_:
-            self.template = self._from_postman(import_, request)
+            imported = self._import(import_, request)
+            # Collection variables are defaults; what the spec declares wins.
+            self.variables = {**imported.pop("variables", {}), **self.variables}
+            imported_auth = imported.pop("auth", {})
+            self.template = imported
+            url = str(self.template.get("url") or "")
+            if endpoint and not url.startswith(("http://", "https://")):
+                # An OpenAPI document with no `servers` yields a bare path; the spec's
+                # endpoint is the server it belongs to.
+                self.template["url"] = endpoint.rstrip("/") + url
+            self._adopt_auth(imported_auth)
 
-    def _from_postman(self, path: str, request_name: str | None) -> dict:
-        col = json.loads(Path(path).read_text())
-        items = col.get("item", [])
-        chosen = None
-        for it in items:
-            if request_name is None or it.get("name") == request_name:
-                chosen = it
-                break
-        if chosen is None:
-            raise ValueError(f"request '{request_name}' not found in collection")
-        r = chosen["request"]
-        url = r["url"]["raw"] if isinstance(r["url"], dict) else r["url"]
-        headers = {h["key"]: h["value"] for h in r.get("header", [])}
-        body = None
-        if r.get("body", {}).get("mode") == "raw":
-            body = r["body"]["raw"]
-        return {"method": r.get("method", "POST"), "url": url, "headers": headers, "body": body}
+    def _import(self, path: str, request_name: str | None) -> dict:
+        # Imported lazily: the generator is a layer above adapters, and importing it at
+        # module scope would make adapter imports depend on the builder's import graph.
+        from ..generator.interface import (
+            detect_format, load_document, openapi_request, postman_request,
+        )
+        doc = load_document(Path(path).read_text())
+        kind = detect_format(doc)
+        if kind == "postman":
+            return postman_request(doc, request_name)
+        if kind == "openapi":
+            return openapi_request(doc, request_name)
+        raise ValueError(f"{path}: not a Postman collection or an OpenAPI document")
+
+    def _adopt_auth(self, imported: dict) -> None:
+        """Carry a collection's declared auth over, without inventing credentials.
+
+        Spec auth always wins -- it is the one that knows which env var holds the token.
+        A collection's bearer token is usually a `{{variable}}`, so it goes in as a header
+        and is filled by the same substitution as everything else.
+        """
+        if self.auth or not imported:
+            return
+        token = (imported.get("params") or {}).get("token")
+        if imported.get("type") == "bearer" and token:
+            self.template.setdefault("headers", {})
+            self.template["headers"]["Authorization"] = f"Bearer {token}"
 
     def describe(self) -> dict:
         return {"adapter": self.name, "endpoint": self.template.get("url")}
