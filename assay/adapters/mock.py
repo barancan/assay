@@ -46,8 +46,45 @@ class MockJudge:
         pass
 
     def complete(self, messages, *, schema=None, tools=None, params=None) -> ModelResponse:
-        # Deterministic neutral verdict so judge-typed checks run offline.
-        verdict = {"scores": {}, "rationale": "mock judge: no model configured",
-                   "evidence_quotes": []}
-        return ModelResponse(text=json.dumps(verdict), json=verdict, status="ok",
+        # Deterministic neutral verdict so judge-typed checks run offline. With a
+        # schema the shape follows the schema instead, so the structured path is
+        # exercised without a provider.
+        if schema:
+            verdict = _from_schema(schema)
+        else:
+            verdict = {"scores": {}, "rationale": "mock judge: no model configured",
+                       "evidence_quotes": []}
+        return ModelResponse(text=json.dumps(verdict), raw=verdict, json=verdict, status="ok",
                              usage={"input_tokens": 0, "output_tokens": 0}, cost_usd=0.0)
+
+
+def _from_schema(schema: dict) -> dict:
+    """Smallest object that satisfies `schema`: every declared property, filled in."""
+    props = schema.get("properties") or {}
+    obj = {name: _placeholder(name, spec) for name, spec in props.items()}
+    for name in schema.get("required") or []:
+        obj.setdefault(name, f"mock {name}")
+    return obj
+
+
+def _placeholder(name: str, spec: dict):
+    spec = spec if isinstance(spec, dict) else {}
+    if spec.get("enum"):
+        return spec["enum"][0]
+    kind = spec.get("type")
+    if isinstance(kind, list):
+        kind = kind[0] if kind else "string"
+    if kind == "object":
+        return _from_schema(spec)
+    if kind == "array":
+        item = spec.get("items")
+        return [_placeholder(name, item)] if isinstance(item, dict) else []
+    if kind == "integer":
+        return 1
+    if kind == "number":
+        return 1.0
+    if kind == "boolean":
+        return True
+    if kind == "null":
+        return None
+    return f"mock {name}"
