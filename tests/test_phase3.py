@@ -163,20 +163,17 @@ def test_workspace_judge_default(client):
     assert "judge_model" in data
 
 
-# ── GET /pipelines/new mock field check ───────────────────────────────────────
+# ── GET /pipelines/new adapter choices ────────────────────────────────────────
 
-def test_adapter_fields_mock_has_no_fields(client):
-    """GET /pipelines/new: the mock adapter block has no <input name=...> elements."""
+def test_the_wizard_does_not_offer_the_mock_adapter(client):
+    """The mock adapter used to be the wizard's first and default choice.
+
+    It passes every check, so picking it produces a green report about nothing. This
+    test replaces one that asserted the mock block was present.
+    """
     resp = client.get("/pipelines/new")
     assert resp.status_code == 200
-
-    # Find the mock-adapter block and confirm no name="..." inputs inside it.
-    # The mock block is identified by id="adapter-mock-fields" in _adapter_fields.html.
     html = resp.text
-    mock_block_start = html.find('id="adapter-mock-fields"')
-    assert mock_block_start != -1, "mock adapter block not found in HTML"
-
-    # Slice out just the mock block (up to the next <div x-show=)
-    block_end = html.find('<div x-show=', mock_block_start + 1)
-    mock_block = html[mock_block_start:block_end] if block_end != -1 else html[mock_block_start:]
-    assert 'name="' not in mock_block
+    assert 'value="mock"' not in html
+    assert 'adapter-mock-fields' not in html
+    assert 'value="anthropic"' in html

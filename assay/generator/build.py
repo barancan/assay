@@ -264,9 +264,36 @@ def _cases_for(intent: dict, iface, cases_by_intent: dict | None) -> list[dict]:
     return cases or deterministic_cases(intent, iface, n=1)
 
 
+def _judges_block(judges: dict | None, has_judge_check: bool) -> dict:
+    """The `judges:` block for a generated spec.
+
+    This used to substitute {"primary": {"provider": "mock", ...}} whenever none was
+    configured, which is how an unconfigured workspace produced a pipeline whose graded
+    checks all passed for free. The stand-in now survives only where mocks are allowed at
+    all (see adapters.registry.mock_allowed); anywhere else, a judge check with no judge
+    is an error that names what to set.
+    """
+    from ..adapters.registry import mock_allowed
+    if judges:
+        return judges
+    if mock_allowed():
+        return {"primary": {"provider": "mock", "model": "mock"}}
+    if has_judge_check:
+        raise LLMConfigError(
+            "this pipeline has graded (judge) checks but no judge model is configured, "
+            "and Assay will not stand in a mock one: a mock judge passes everything, so "
+            "the report would be green and mean nothing.\n"
+            "Configure a judge under Settings > Providers (set $ANTHROPIC_API_KEY or "
+            "$OPENAI_API_KEY first), or pass --judge provider:model to `assay generate`.",
+            adapter="unconfigured",
+        )
+    return {}
+
+
 def intents_to_spec(project: str, intents: list[dict], target: dict,
                     judges: dict, iface=None,
                     cases_by_intent: dict | None = None) -> dict:
+    judges = _judges_block(judges, any(it["how"] == "judge" for it in intents))
     iface = iface if iface is not None else Interface()
     suites: dict[str, list] = {}
     used_ids: set[str] = set()
@@ -301,7 +328,7 @@ def intents_to_spec(project: str, intents: list[dict], target: dict,
             suites.setdefault(ref, []).append(emitted)
     return {
         "version": 1, "project": project, "target": target,
-        "judges": judges or {"primary": {"provider": "mock", "model": "mock"}},
+        "judges": judges,
         # One suite per requirement: the coverage matrix keys off suite.requirement_ref.
         "suites": [{"id": ref, "requirement_ref": ref, "cases": cases}
                    for ref, cases in suites.items()],
