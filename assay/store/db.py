@@ -10,28 +10,52 @@ _engine = None
 _Session = None
 
 
+# Portable column types. The hand-rolled migrations below previously emitted SQLite
+# spellings unconditionally, which would fail against the Postgres path the README
+# documents. Keyed by dialect name, with a fallback for anything unlisted.
+_TYPE_MAP = {
+    "timestamp": {"sqlite": "DATETIME", "postgresql": "TIMESTAMP"},
+    "text": {"sqlite": "TEXT", "postgresql": "TEXT"},
+    "int": {"sqlite": "INTEGER", "postgresql": "INTEGER"},
+}
+
+
+def _ddl_type(logical: str) -> str:
+    """Map a logical column type to this dialect's spelling."""
+    if logical.startswith("varchar"):
+        return logical.upper()
+    mapping = _TYPE_MAP.get(logical, {})
+    return mapping.get(_engine.dialect.name, mapping.get("sqlite", logical.upper()))
+
+
+def _add_columns(table: str, columns: list[tuple[str, str]]) -> None:
+    """Add any of `columns` (name, logical_type) that `table` does not already have.
+
+    Additive and nullable only -- existing rows read NULL. Safe to run on every start.
+    """
+    from sqlalchemy import text, inspect as sa_inspect
+    existing = {col["name"] for col in sa_inspect(_engine).get_columns(table)}
+    missing = [(name, t) for name, t in columns if name not in existing]
+    if not missing:
+        return
+    with _engine.begin() as conn:
+        for name, logical in missing:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {_ddl_type(logical)}"))
+
+
 def _migrate():
     """Add columns introduced after initial schema creation."""
-    from sqlalchemy import text, inspect as sa_inspect
-    insp = sa_inspect(_engine)
-    existing = {col["name"] for col in insp.get_columns("reports")}
-    new_cols = [
-        ("verdict", "VARCHAR(20)"),
-        ("verdict_reason", "TEXT"),
-        ("verdict_set_by", "VARCHAR(120)"),
-        ("verdict_set_at", "DATETIME"),
-    ]
-    with _engine.begin() as conn:
-        for col, col_type in new_cols:
-            if col not in existing:
-                conn.execute(text(f"ALTER TABLE reports ADD COLUMN {col} {col_type}"))
-
-    pv_existing = {col["name"] for col in insp.get_columns("pipeline_versions")}
-    pv_new_cols = [("step_reached", "VARCHAR(20)")]
-    with _engine.begin() as conn:
-        for col, col_type in pv_new_cols:
-            if col not in pv_existing:
-                conn.execute(text(f"ALTER TABLE pipeline_versions ADD COLUMN {col} {col_type}"))
+    _add_columns("reports", [
+        ("verdict", "varchar(20)"),
+        ("verdict_reason", "text"),
+        ("verdict_set_by", "varchar(120)"),
+        ("verdict_set_at", "timestamp"),
+    ])
+    _add_columns("pipeline_versions", [("step_reached", "varchar(20)")])
+    _add_columns("runs", [
+        ("cases_total", "int"),
+        ("error", "text"),
+    ])
 
 
 def _seed_settings():
@@ -49,7 +73,12 @@ def _seed_settings():
 def init_db():
     global _engine, _Session
     config.ensure_dirs()
-    _engine = create_engine(config.DB_URL, future=True)
+    connect_args = {}
+    if config.DB_URL.startswith("sqlite"):
+        # Runs execute on a background thread so the browser can watch progress;
+        # SQLite's default same-thread guard would reject those connections.
+        connect_args["check_same_thread"] = False
+    _engine = create_engine(config.DB_URL, future=True, connect_args=connect_args)
     Base.metadata.create_all(_engine)
     _migrate()
     _Session = sessionmaker(bind=_engine, future=True, expire_on_commit=False)

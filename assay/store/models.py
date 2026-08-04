@@ -83,6 +83,10 @@ class Run(Base):
     started_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_now)
     finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     total_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    # Known up front from the spec, so progress can be reported as done/total while
+    # the run is still executing.
+    cases_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
     results: Mapped[list["CaseResult"]] = relationship(back_populates="run")
     report: Mapped["Report"] = relationship(back_populates="run", uselist=False)
     target: Mapped["TargetModel"] = relationship()

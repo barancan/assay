@@ -1,0 +1,44 @@
+{# Polled fragment. Swaps itself; the poll stops when the server sends HX-Redirect. #}
+<div id="run-progress"
+     hx-get="/runs/{{ run_id }}/progress"
+     hx-trigger="every 2s"
+     hx-swap="outerHTML">
+
+  {% if progress.status == 'error' %}
+  <div class="banner banner-danger">
+    <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+    <div>
+      <div style="font-weight:500">Run failed</div>
+      <div style="color:var(--text-muted);font-size:13px">
+        {{ progress.error or 'No error detail was recorded.' }}
+      </div>
+    </div>
+  </div>
+  {% else %}
+
+  <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.75rem">
+    <span class="badge badge-draft">
+      <i class="ti ti-loader-2" aria-hidden="true"></i> Running
+    </span>
+    <span style="color:var(--text-secondary);font-size:14px">
+      {% if progress.total %}
+        Case {{ progress.done }} of {{ progress.total }}
+      {% else %}
+        {{ progress.done }} case{{ 's' if progress.done != 1 }} complete
+      {% endif %}
+    </span>
+  </div>
+
+  {% if progress.total %}
+  {% set pct = (progress.done / progress.total * 100) | round | int %}
+  <div style="height:8px;background:var(--surface-1);border-radius:var(--radius);overflow:hidden"
+       role="progressbar"
+       aria-valuenow="{{ pct }}" aria-valuemin="0" aria-valuemax="100"
+       aria-label="Run progress">
+    <div style="height:100%;width:{{ pct }}%;background:var(--text-accent);transition:width .3s ease"></div>
+  </div>
+  <div style="margin-top:.4rem;color:var(--text-muted);font-size:12px">{{ pct }}%</div>
+  {% endif %}
+
+  {% endif %}
+</div>

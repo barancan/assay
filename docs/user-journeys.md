@@ -192,7 +192,7 @@ wizard (P0/P7).
 | 4 | Execute generated checks in the sandbox | — | — | `sandbox/runner.py` | `CheckResult` | **PARTIAL** — the sandbox runs, but the import allowlist and the removal of `open`/`exec`/`eval`/`compile` install **after** `exec_module` (`sandbox/runner.py:62-76`), so a check's top-level code runs unsandboxed |
 | 5 | Execute judge checks | — | — | `judges/judge.py` | `CheckResult` | **BROKEN** — rubrics are never materialised (`engine/runner.py:51-67` handles only `generated_sources`), so `judges/judge.py:18` raises `FileNotFoundError` and kills the entire run (P2) |
 | 6 | Record tokens and cost per case | — | — | `pricing.estimate_cost` | `CaseResult` cost columns | **MISSING** — the columns do not exist; `Run.total_cost_usd` is always 0 (P5) |
-| 7 | See progress during a long run | run progress view | — | — | — | **MISSING** — the POST blocks until every case completes; no streaming, no queue, no cancel. Tolerable against mocks, not against real models |
+| 7 | See progress during a long run | `run_progress.html` + polled `_run_progress.html` | `GET /runs/{run_id}`, `GET /runs/{run_id}/progress` | `engine.runner.start_run`, `run_progress` | `Run.cases_total`, per-case commits | **PARTIAL** — a browser run now returns immediately and polls a done/total progress bar, redirecting to the report when it lands. Setup failures still raise synchronously. No cancel yet, and no queue: runs execute on a background thread in-process |
 | 8 | Land at `ready_for_review` | `HX-Redirect` to the report | — | `engine.review.submit_for_review:140` | `Report.state` transition + `StateTransition` row | **BUILT** |
 
 ---

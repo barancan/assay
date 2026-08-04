@@ -706,9 +706,27 @@ def trigger_run(
     request: Request,
     x_assay_user: str | None = Header(default=None),
 ):
-    from ..engine import execute_run, submit_for_review
+    from ..engine import execute_run, start_run, submit_for_review
     from ..reporting import export_report
     actor = _require_identity(request, x_assay_user)
+
+    # A browser gets an immediate redirect to a progress view: with real models a run
+    # takes minutes, and blocking the request leaves the user staring at a dead button.
+    # Programmatic callers (CI, the webhook, the JSON API) keep synchronous semantics,
+    # where the response carrying report_id is the whole point.
+    if _is_htmx(request):
+        try:
+            run_id = start_run(
+                pipeline_version_id=version_id,
+                trigger="manual",
+                triggered_by=actor,
+            )
+        except PermissionError as e:
+            raise HTTPException(403, str(e))
+        except Exception as e:
+            raise HTTPException(422, str(e)[:200])
+        return Response(headers={"HX-Redirect": f"/runs/{run_id}"})
+
     try:
         run_id = execute_run(
             pipeline_version_id=version_id,
@@ -724,9 +742,39 @@ def trigger_run(
         rep_id = rep.id
     submit_for_review(rep_id, actor=actor)
     export_report(run_id)
-    if _is_htmx(request):
-        return Response(headers={"HX-Redirect": f"/reports/{rep_id}"})
     return {"ok": True, "run_id": run_id, "report_id": rep_id}
+
+
+@app.get("/runs/{run_id}", response_class=HTMLResponse)
+def run_progress_page(request: Request, run_id: int):
+    from ..engine import run_progress
+    try:
+        progress = run_progress(run_id)
+    except ValueError:
+        raise HTTPException(404, f"Run {run_id} not found")
+    return templates.TemplateResponse(request, "run_progress.html", {
+        "progress": progress,
+        "run_id": run_id,
+        "identity": _identity(request),
+    })
+
+
+@app.get("/runs/{run_id}/progress", response_class=HTMLResponse)
+def run_progress_fragment(request: Request, run_id: int):
+    """Polled by the progress page. Redirects to the report once the run lands."""
+    from ..engine import run_progress
+    try:
+        progress = run_progress(run_id)
+    except ValueError:
+        raise HTTPException(404, f"Run {run_id} not found")
+
+    if progress["status"] == "complete" and progress["report_id"]:
+        return Response(headers={"HX-Redirect": f"/reports/{progress['report_id']}"})
+
+    return templates.TemplateResponse(request, "_run_progress.html", {
+        "progress": progress,
+        "run_id": run_id,
+    })
 
 
 @app.get("/pipelines/{pipeline_id}/versions")

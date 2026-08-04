@@ -4,6 +4,8 @@ import datetime as dt
 import shutil
 import subprocess
 import tempfile
+import threading
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..spec.models import Spec
@@ -110,13 +112,28 @@ def _patch_spec_paths(
     return spec.model_copy(update={"suites": new_suites})
 
 
-def execute_run(
-    spec: Spec | None = None,
-    *,
-    pipeline_version_id: int | None = None,
-    trigger: str = "manual",
-    triggered_by: str = "cli",
-) -> int:
+@dataclass
+class _RunContext:
+    """Everything a run needs after setup, so the case loop can run anywhere."""
+    run_id: int
+    spec: Spec
+    target: object
+    judges: dict
+    tmpdir: str | None
+    triggered_by: str
+
+
+def _setup_run(
+    spec: Spec | None,
+    pipeline_version_id: int | None,
+    trigger: str,
+    triggered_by: str,
+) -> _RunContext:
+    """Resolve the spec, materialise artifacts, reach the target, create the Run row.
+
+    Everything here is fast and fails loudly, so a caller that dispatches the case
+    loop to a thread still surfaces "unreachable target" synchronously.
+    """
     spec, pv_id, generated_sources, rubrics = _resolve_spec(spec, pipeline_version_id)
 
     tmpdir = None
@@ -132,6 +149,7 @@ def execute_run(
         # Fail fast before touching the DB if the target is unreachable.
         test_connection(target)
 
+        total_cases = sum(len(suite.cases) for suite in spec.suites)
         with session_scope() as s:
             tm = TargetModel(project=spec.project, adapter=spec.target.adapter,
                              model=spec.target.model, endpoint=spec.target.endpoint,
@@ -141,45 +159,160 @@ def execute_run(
             run = Run(project=spec.project, spec_hash=spec_hash(spec),
                       git_commit=_git_commit(), target_id=tm.id,
                       pipeline_version_id=pv_id,
-                      trigger=trigger, triggered_by=triggered_by, status="running")
+                      trigger=trigger, triggered_by=triggered_by, status="running",
+                      cases_total=total_cases)
             s.add(run)
             s.flush()
             run_id = run.id
-
-            case_flags: list[bool] = []
-            total_cost = 0.0
-            for suite in spec.suites:
-                for case in suite.cases:
-                    req = ModelRequest(input=case.input, params=spec.target.params)
-                    resp = target.invoke(req)
-                    total_cost += resp.cost_usd or 0.0
-                    rdict = resp.as_dict()
-                    ctx = {"input": case.input, "suite": suite.id, "case": case.id}
-                    results: list[CheckResult] = [
-                        run_check(c, rdict, ctx, judges) for c in case.checks]
-                    ok = case_passed(results)
-                    case_flags.append(ok)
-                    s.add(CaseResult(
-                        run_id=run_id, suite_id=suite.id, case_id=case.id,
-                        requirement_ref=suite.requirement_ref,
-                        request={"input": case.input}, response=rdict,
-                        checks=[r.to_dict() for r in results], passed=ok,
-                        latency_ms=resp.latency_ms))
-
-            run.status = "complete"
-            run.finished_at = dt.datetime.now(dt.timezone.utc)
-            run.total_cost_usd = total_cost
-
-            summary = {"cases": len(case_flags), "passed": sum(case_flags),
-                       "failed": len(case_flags) - sum(case_flags)}
-            report = Report(run_id=run_id, state="pending", summary=summary)
-            s.add(report)
-            s.flush()
-            s.add(StateTransition(report_id=report.id, from_state=None,
-                                  to_state="pending", actor=triggered_by,
-                                  note="run created"))
-        return run_id
-
-    finally:
+    except Exception:
         if tmpdir:
             shutil.rmtree(tmpdir, ignore_errors=True)
+        raise
+
+    return _RunContext(run_id=run_id, spec=spec, target=target, judges=judges,
+                       tmpdir=tmpdir, triggered_by=triggered_by)
+
+
+def _execute_cases(ctx: _RunContext) -> None:
+    """Run every case, committing after each one so progress is observable.
+
+    Each case is its own transaction. A run that dies half way therefore keeps the
+    results it did produce, and the progress view can count them as they land.
+    """
+    case_flags: list[bool] = []
+    total_cost = 0.0
+    spec, target, judges = ctx.spec, ctx.target, ctx.judges
+
+    for suite in spec.suites:
+        for case in suite.cases:
+            req = ModelRequest(input=case.input, params=spec.target.params)
+            resp = target.invoke(req)
+            total_cost += resp.cost_usd or 0.0
+            rdict = resp.as_dict()
+            cctx = {"input": case.input, "suite": suite.id, "case": case.id}
+            results: list[CheckResult] = [
+                run_check(c, rdict, cctx, judges) for c in case.checks]
+            ok = case_passed(results)
+            case_flags.append(ok)
+            with session_scope() as s:
+                s.add(CaseResult(
+                    run_id=ctx.run_id, suite_id=suite.id, case_id=case.id,
+                    requirement_ref=suite.requirement_ref,
+                    request={"input": case.input}, response=rdict,
+                    checks=[r.to_dict() for r in results], passed=ok,
+                    latency_ms=resp.latency_ms))
+
+    with session_scope() as s:
+        run = s.get(Run, ctx.run_id)
+        run.status = "complete"
+        run.finished_at = dt.datetime.now(dt.timezone.utc)
+        run.total_cost_usd = total_cost
+
+        summary = {"cases": len(case_flags), "passed": sum(case_flags),
+                   "failed": len(case_flags) - sum(case_flags)}
+        report = Report(run_id=ctx.run_id, state="pending", summary=summary)
+        s.add(report)
+        s.flush()
+        s.add(StateTransition(report_id=report.id, from_state=None,
+                              to_state="pending", actor=ctx.triggered_by,
+                              note="run created"))
+
+
+def _mark_run_failed(run_id: int, exc: Exception) -> None:
+    with session_scope() as s:
+        run = s.get(Run, run_id)
+        if run is not None:
+            run.status = "error"
+            run.error = f"{type(exc).__name__}: {exc}"[:500]
+            run.finished_at = dt.datetime.now(dt.timezone.utc)
+
+
+def execute_run(
+    spec: Spec | None = None,
+    *,
+    pipeline_version_id: int | None = None,
+    trigger: str = "manual",
+    triggered_by: str = "cli",
+) -> int:
+    """Run a pipeline to completion synchronously and return the run id."""
+    ctx = _setup_run(spec, pipeline_version_id, trigger, triggered_by)
+    try:
+        _execute_cases(ctx)
+        return ctx.run_id
+    except Exception as exc:
+        _mark_run_failed(ctx.run_id, exc)
+        raise
+    finally:
+        if ctx.tmpdir:
+            shutil.rmtree(ctx.tmpdir, ignore_errors=True)
+
+
+def start_run(
+    spec: Spec | None = None,
+    *,
+    pipeline_version_id: int | None = None,
+    trigger: str = "manual",
+    triggered_by: str = "cli",
+    submit: bool = True,
+) -> int:
+    """Begin a run on a background thread and return its id immediately.
+
+    Setup -- resolving the spec and reaching the target -- still happens on the
+    calling thread, so an unreachable target or an inactive version raises here
+    rather than disappearing into the background. Only the case loop is deferred,
+    which is the part that takes real time once real models are involved.
+
+    With `submit`, the finished run is moved to `ready_for_review` and exported, the
+    same way the synchronous HTTP path does it.
+    """
+    ctx = _setup_run(spec, pipeline_version_id, trigger, triggered_by)
+
+    def _worker() -> None:
+        try:
+            _execute_cases(ctx)
+            if submit:
+                _submit_and_export(ctx.run_id, ctx.triggered_by)
+        except Exception as exc:                      # noqa: BLE001 - recorded on the run
+            _mark_run_failed(ctx.run_id, exc)
+        finally:
+            if ctx.tmpdir:
+                shutil.rmtree(ctx.tmpdir, ignore_errors=True)
+
+    threading.Thread(target=_worker, name=f"assay-run-{ctx.run_id}", daemon=True).start()
+    return ctx.run_id
+
+
+def _submit_and_export(run_id: int, actor: str) -> None:
+    from .review import submit_for_review
+    from ..reporting import export_report
+
+    with session_scope() as s:
+        report = s.query(Report).filter_by(run_id=run_id).one_or_none()
+        report_id = report.id if report else None
+    if report_id is not None:
+        submit_for_review(report_id, actor=actor)
+    export_report(run_id)
+
+
+def run_progress(run_id: int) -> dict:
+    """Current state of a run, for the progress view.
+
+    `done` counts persisted case results, which is why _execute_cases commits per
+    case rather than once at the end.
+    """
+    with session_scope() as s:
+        run = s.get(Run, run_id)
+        if run is None:
+            raise ValueError(f"Run {run_id} not found")
+        done = s.query(CaseResult).filter_by(run_id=run_id).count()
+        report = s.query(Report).filter_by(run_id=run_id).one_or_none()
+        return {
+            "run_id": run_id,
+            "project": run.project,
+            "status": run.status,
+            "done": done,
+            "total": run.cases_total,
+            "report_id": report.id if report else None,
+            "error": run.error,
+            "started_at": run.started_at,
+        }

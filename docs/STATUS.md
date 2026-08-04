@@ -75,7 +75,7 @@ disagrees with this page, this page is right and the other is a bug.
 | Run-level / suite-level gating | **Planned** | `Spec.gating` is parsed (`spec/models.py:57`) and never read; `engine/gating.py:10` is dead code; suite-level `gate:` is silently discarded |
 | Token and cost capture | **Planned** | No columns on `CaseResult`; `Run.total_cost_usd` is always 0 |
 | Regression vs. the last approved run | **Planned** | |
-| Run progress / streaming / cancel | **Planned** | The run request blocks until every case completes |
+| Run progress | **Partial** | A browser run returns immediately and polls a done/total progress view; no cancel, and runs execute on an in-process background thread rather than a queue |
 | Scheduler / `assay watch` | **Planned** | |
 
 ## Review, approval, audit
@@ -130,8 +130,8 @@ at the end of `assay run`.
 | Capability | Status | Note |
 |---|---|---|
 | SQLite default | **Built** | |
-| Postgres via `ASSAY_DB_URL` | **Partial** | No code change is needed, but `store/db.py:13-34` emits SQLite-only DDL (`DATETIME`) in its hand-rolled migrations |
-| Schema migrations | **Partial** | Hand-rolled `ALTER TABLE`; no Alembic |
+| Postgres via `ASSAY_DB_URL` | **Partial** | No code change is needed, and migrations are now dialect-aware, but the Postgres path is not exercised in CI |
+| Schema migrations | **Partial** | Hand-rolled additive `ALTER TABLE` via `store/db.py:_add_columns`; no Alembic |
 | Cases as first-class rows | **Planned** | Cases live as JSON inside `PipelineVersion.config` |
 | `TargetModel.interface_hash` | **Planned** | The column exists and is never populated |
 
