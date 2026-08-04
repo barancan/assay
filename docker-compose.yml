@@ -5,6 +5,10 @@ services:
     environment:
       # Required: Postgres connection string.
       ASSAY_DB_URL: postgresql+psycopg://assay:assay@db:5432/assay
+      # Must match the mounted volume below. Without it ASSAY_HOME defaults to
+      # ./.assay under WORKDIR (/app), so exported reports land outside the
+      # volume and are lost when the container is replaced.
+      ASSAY_HOME: /root/.assay
       # Enforced auth mode: reject forged cookies and unseeded approvers.
       ASSAY_AUTH: enforced
       # Required in enforced mode: generate with:

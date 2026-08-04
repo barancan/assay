@@ -30,6 +30,17 @@ def secret_is_default() -> bool:
     return secret_key() == _DEV_SECRET
 
 
+def api_token() -> str | None:
+    """Shared secret that lets a non-browser caller assert an identity.
+
+    `X-Assay-User` is an assertion, not a credential. In enforced mode a caller must
+    prove it with `X-Assay-Token`, or the header grants nothing -- otherwise anyone who
+    can reach the port could name a reviewer and approve a report, which would make the
+    approval gate decorative.
+    """
+    return os.environ.get("ASSAY_API_TOKEN") or None
+
+
 def enforce_posture_or_raise() -> None:
     """In enforced mode, raise RuntimeError if the signing key is the public dev default."""
     if auth_mode() == "enforced" and secret_is_default():

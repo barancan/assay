@@ -56,6 +56,78 @@
 {% include "_summary_bar.html" %}
 {% endwith %}
 
+{#
+  Spend. Cost is read off each case row rather than from a run-level figure, so the
+  total can never disagree with the lines it is made of. A case with no recorded cost
+  renders "unknown" and is counted separately -- it must never be added in as $0.00,
+  which is the bug this view exists to make impossible.
+
+  Each field is guarded with `is defined` so the card degrades to "unknown" rather than
+  erroring if the view context has not been extended with the token columns yet.
+#}
+{% set sp = namespace(usd=0.0, unknown=0, tin=0, tout=0, tjudge=0, any=false) %}
+{% for cr in case_results %}
+  {% set c_cost = cr.cost_usd if cr.cost_usd is defined else none %}
+  {% if c_cost is none %}{% set sp.unknown = sp.unknown + 1 %}
+  {% else %}{% set sp.usd = sp.usd + c_cost %}{% set sp.any = true %}{% endif %}
+  {% set sp.tin = sp.tin + ((cr.input_tokens if cr.input_tokens is defined else 0) or 0) %}
+  {% set sp.tout = sp.tout + ((cr.output_tokens if cr.output_tokens is defined else 0) or 0) %}
+  {% set sp.tjudge = sp.tjudge + ((cr.judge_tokens if cr.judge_tokens is defined else 0) or 0) %}
+{% endfor %}
+
+<div class="card">
+  <h2><i class="ti ti-coin" aria-hidden="true"></i> Spend</h2>
+  <dl class="meta">
+    <div>
+      <dt>Total</dt>
+      <dd>
+        {% if sp.any %}
+          <strong>${{ '%.4f' % sp.usd }}</strong>{% if sp.unknown %} <span style="color:var(--text-muted)">(lower bound)</span>{% endif %}
+        {% else %}
+          <strong style="color:var(--text-muted)">unknown</strong>
+        {% endif %}
+      </dd>
+    </div>
+    <div><dt>Target tokens</dt><dd>{{ sp.tin }} in / {{ sp.tout }} out</dd></div>
+    <div><dt>Judge tokens</dt><dd>{{ sp.tjudge }}</dd></div>
+  </dl>
+  {% if sp.unknown %}
+  <p style="color:var(--text-muted);font-size:13px;margin:.5rem 0 0">
+    <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+    {{ sp.unknown }} of {{ case_results | length }} case(s) could not be priced — the model
+    is not in the price table. Set <code>ASSAY_PRICING_FILE</code> to add it.
+  </p>
+  {% endif %}
+
+  <table style="margin-top:.85rem">
+    <thead>
+      <tr><th>Suite</th><th>Case</th><th>In</th><th>Out</th><th>Judge</th><th>Cost</th></tr>
+    </thead>
+    <tbody>
+    {% for cr in case_results %}
+      {% set c_cost = cr.cost_usd if cr.cost_usd is defined else none %}
+      {% set c_in = cr.input_tokens if cr.input_tokens is defined else none %}
+      {% set c_out = cr.output_tokens if cr.output_tokens is defined else none %}
+      {% set c_judge = cr.judge_tokens if cr.judge_tokens is defined else none %}
+      <tr>
+        <td style="color:var(--text-muted);font-size:13px">{{ cr.suite_id }}</td>
+        <td style="font-size:13px">{{ cr.case_id }}</td>
+        <td style="font-size:13px">{{ '—' if c_in is none else c_in }}</td>
+        <td style="font-size:13px">{{ '—' if c_out is none else c_out }}</td>
+        <td style="font-size:13px">{{ '—' if c_judge is none else c_judge }}</td>
+        <td style="font-size:13px">
+          {% if c_cost is none %}
+            <span style="color:var(--text-muted)" title="This model is not in the price table">unknown</span>
+          {% else %}
+            ${{ '%.4f' % c_cost }}
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
 <!-- Reviewer assignment -->
 <div class="card">
   <h2>Reviewer</h2>

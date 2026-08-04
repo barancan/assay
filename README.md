@@ -6,17 +6,17 @@ test, routes each test to the right approach (deterministic template, sandboxed
 generated function, or LLM judge), runs it, and produces a saved, reviewable
 report that a named human must sign off before it is considered production ready.
 
-> **Status: pre-1.0, and the builder half is not finished.** The runner — execute,
-> review, adjudicate, approve, audit — works end to end. The builder derives test
-> intents with a real model on every path (`assay generate --offline` is the only
-> way to get the old keyword heuristic), but **LLM codegen is not implemented yet**. Read
+> **Status: pre-1.0.** The runner — execute, review, adjudicate, approve, audit —
+> works end to end, and the builder now uses a real model on every path: intents,
+> rubrics, test cases, and generated Python checks. `assay generate --offline` is
+> the only way to get the old keyword heuristic. Read
 > [`docs/STATUS.md`](docs/STATUS.md) before you rely on anything below; every
 > capability is marked built, partial, or planned.
 
 ## Why it exists
 
 - **Eval-as-code.** The pipeline (`assay.yaml` + `generated/`) lives in your repo, diffable and version-pinned.
-- **Three ways to test.** Vetted templates where a mechanical check fits; LLM-generated Python (sandboxed) where it does not; LLM judges for semantic calls. *Templates and judges work today; generated-function codegen is [planned](docs/STATUS.md#builder-requirements--pipeline).*
+- **Three ways to test.** Vetted templates where a mechanical check fits; LLM-generated Python (sandboxed) where it does not; LLM judges for semantic calls.
 - **Provider-agnostic.** Targets and judges: Anthropic, OpenAI / OpenAI-compatible, Ollama, and generic REST with Postman or OpenAPI import.
 - **Auditable and gated.** Every run records the tested model, test cases, full responses, and the approver. Reports move `pending → ready_for_review → done`; automation can trigger runs but only a reviewer can promote to `done`.
 
@@ -109,9 +109,25 @@ ASSAY_AUTH=enforced assay serve --host 0.0.0.0
 docker compose up
 ```
 
-In enforced mode the server refuses to start with the built-in dev secret, all
-privileged actions require a valid session or `X-Assay-User` header, and at
+In enforced mode the server refuses to start with the built-in dev secret, and at
 least one reviewer account must exist before any approval goes through.
+
+**Non-browser callers need a token.** `X-Assay-User` is an assertion, not a
+credential -- anyone who can reach the port can send one. In enforced mode it is
+accepted only alongside a matching `X-Assay-Token`, and refused outright when no
+token is configured, so naming a reviewer is not enough to approve a report:
+
+```bash
+export ASSAY_API_TOKEN=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
+
+# CI and other API callers then send both headers
+curl -X POST http://assay:8000/hooks/run \
+  -H "X-Assay-User: ci-bot" -H "X-Assay-Token: $ASSAY_API_TOKEN" \
+  -d '{"spec": "assay.yaml"}'
+```
+
+A browser session cookie from `/login` is proof on its own and needs no token.
+Open mode is unchanged and stays frictionless for a single developer.
 
 ## How the build works
 
@@ -128,29 +144,42 @@ What that looks like in the current build:
 | Requirement traceability | Requirements are split into `R1…Rn` (`generator/ingest.py`); every intent must cite one, and each becomes its own suite so the coverage matrix has real buckets |
 | Route deterministic vs. judge | Decided by the same call; no rationale is recorded |
 | Template checks | Working — 11 primitives |
-| Generated functions | **Not implemented.** Routing an intent to `generated` produces a spec entry with no source behind it |
-| Judge rubrics | A fixed single-dimension rubric, not the anchored multi-dimension rubric the design describes |
-| Test cases | Emitted with empty inputs |
-| Interface grounding | The target's interface is parsed — Postman collections (nested folders, named requests, `{{variables}}`, auth), OpenAPI 3 in JSON or YAML (local `$ref`s resolved, request fields and JSONPath response paths derived), and MCP tool schemas. The `rest` adapter imports through the same parser. Not yet consumed by case generation |
+| Generated functions | Written by the model, then gated: a static AST check (contract, import allowlist, no escape constructs), a sandboxed dry-run against a sample response, and a discrimination test so a check that passes everything is rejected. Up to two repair attempts, then the intent degrades to a judge check with the reason recorded |
+| Judge rubrics | Model-authored, at least two anchored dimensions with observable 0/1/2 levels, validated and repaired once before falling back to a deterministic rubric. Verdicts are schema-forced and their evidence quotes are verified against the response |
+| Test cases | Concrete inputs per intent, grounded on the interface's real request fields, with nominal, empty, boundary and hostile variants. A golden dataset can be bound instead with `--dataset` |
+| Interface grounding | The target's interface is parsed — Postman collections (nested folders, named requests, `{{variables}}`, auth), OpenAPI 3 in JSON or YAML (local `$ref`s resolved, request fields and JSONPath response paths derived), and MCP tool schemas. The `rest` adapter imports through the same parser, and case generation consumes it |
 
 Closing this gap is the current priority — see the roadmap in
 [`docs/STATUS.md`](docs/STATUS.md).
 
 ## Sandbox honesty
 
-Generated checks are **pure functions of captured data** -- they receive dicts,
-never a model client. They run in an isolated subprocess with CPU/memory
-rlimits, a wall-clock timeout, an import allowlist (no `os`/`socket`/`subprocess`/...),
-and `open`/`exec`/`eval`/`compile` removed. The lockdown is installed before the
-module body executes, so it covers a check's top-level statements as well as the
-body of `check()`.
+Generated checks are **pure functions of captured data** -- they receive dicts, never a
+model client. Each one runs in a separate isolated interpreter with:
 
-What this does **not** do, despite what earlier versions of this file claimed:
-the subprocess inherits the engine's working directory (there is no filesystem
-jail) and there is no OS-level egress block — only the `socket` factories are
-patched, as defence in depth. This contains buggy and naive-malicious checks; it
-is not a boundary for genuinely untrusted third-party code. A hardened tier
-(gVisor / Firecracker / WASM) is designed but **not implemented**.
+- an **empty environment** -- the parent's variables, including provider API keys, are
+  not inherited
+- a **throwaway working directory**, so relative paths reach nothing and the repo and
+  `.assay/` are not the cwd
+- a **network namespace with no interfaces** on Linux hosts that allow unprivileged
+  `unshare` -- a real egress block, not a monkeypatch
+- CPU and address-space rlimits plus a hard wall-clock timeout
+- an import allowlist (no `os`/`socket`/`subprocess`/...) and `open`/`exec`/`eval`/
+  `compile` removed, both installed **before** the module body executes, so they cover
+  a check's top-level statements as well as `check()`
+
+The source is read by the trusted parent and passed in, so the child never needs
+filesystem access at all.
+
+Where the network namespace is unavailable -- non-Linux hosts, or kernels with user
+namespaces disabled -- egress falls back to patched socket factories behind the import
+allowlist, which is weaker. `assay.sandbox.sandbox_tier()` reports which layers are
+actually active on your host, because a containment claim that isn't true is worse than
+one that's merely modest.
+
+This is not a guarantee against a determined adversary with native-code tricks. For
+genuinely untrusted third-party code, run Assay inside a VM or container boundary you
+control.
 
 ## Adapters
 

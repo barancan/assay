@@ -4,7 +4,7 @@ What is actually built, what is partial, and what is still planned. This file is
 source of truth for capability claims. If the README, the design doc, or a docstring
 disagrees with this page, this page is right and the other is a bug.
 
-**Last verified:** 2026-08-04 against `claude/real-judging-and-grounding`. 471 tests passing, with zero API keys set.
+**Last verified:** 2026-08-04 against `claude/hardened-sandbox-and-codegen`. 702 tests passing, with zero API keys set.
 
 | Marker | Meaning |
 |---|---|
@@ -12,12 +12,12 @@ disagrees with this page, this page is right and the other is a bug.
 | **Partial** | Exists but incomplete, or works only in the offline path |
 | **Planned** | Designed, not implemented |
 
-> **The headline:** the *runner* — execute, review, adjudicate, approve, audit — is
-> production-shaped. The *builder* now calls a real model on every path, grounds on the
-> target's interface, and emits cases with real inputs and judges with verified evidence.
-> **LLM codegen still does not exist**, so an intent routed to `generated` produces a
-> spec entry with no source behind it — the one remaining piece of the product's core
-> claim. See [Roadmap](#roadmap).
+> **The headline:** every phase of the original market-ready plan is now built. The
+> builder uses a real model for intents, rubrics, cases and generated Python checks;
+> generated code runs behind a hardened boundary; runs report what they cost; and mock
+> adapters no longer resolve outside tests, so a fresh install cannot produce a
+> meaningless green report. What remains is breadth rather than the core claim —
+> run history, regression detection, spec export, and the gaps listed below.
 
 ## Builder (requirements → pipeline)
 
@@ -27,18 +27,18 @@ disagrees with this page, this page is right and the other is a bug.
 | Requirement traceability (`R1…Rn`) | **Built** | `generator/ingest.py` splits requirements into `R1…Rn`; the prompt carries those ids, every returned `requirement_ref` is resolved against them, and `intents_to_spec` emits one suite per requirement |
 | Route deterministic vs. judge | **Partial** | Decided inside the single intent call; no rationale is persisted, no per-intent override |
 | Bind to a template check | **Built** | 11 primitives (`checks/library.py`) |
-| Generate a Python check (codegen) | **Planned** | `generator/build.py:144` hardcodes `generated_sources = {}`. A `generated` intent produces a spec pointing at a file that is never written |
+| Generate a Python check (codegen) | **Built** | `generator/codegen.py` writes the check, then gates it: a static AST check (contract, import allowlist, no `__globals__`/`__subclasses__` crawling), a sandboxed dry-run, and a discrimination test so a check that passes every response is rejected. Up to two repairs, then the intent degrades to a judge check with the reason in `build_meta.codegen_failures` |
 | Generate a judge rubric | **Built** | `generator/rubricgen.py` asks the builder model for ≥2 anchored dimensions (0/1/2 levels describing observable properties), plus `min_score`, `require_evidence`, `samples` and the verdict `output_schema`. Output is validated — slug-safe unique ids, complete scales, `min_score` in range — then repaired once, then falls back to the deterministic `fallback_rubric` (also the `--offline` path). The web wizard and the CLI both hand it the configured builder model, so neither is quietly weaker than the other |
 | Generate test cases | **Built** | `generator/casegen.py` produces concrete inputs per intent, grounded on the interface's real request fields, with nominal, empty, boundary and hostile variants. Ids are validated rather than sanitised, and a single gate in `build.py` means no path can emit a case with an empty input |
 | Ground on the target interface | **Built** | `generator/interface.py` parses Postman, OpenAPI 3 (JSON or YAML, local `$ref`s resolved) and MCP tool schemas into request fields, a response schema and JSONPath response paths; `adapters/rest.py` uses the same reader so adapter and builder cannot drift. Case generation consumes it. Detection is by content, not extension. An unreadable *document* stays ungrounded; a path the user explicitly supplied that does not exist is an error. Codegen will consume `sample_response` when it lands (P4) |
 | Golden dataset binding | **Built** | `assay generate --dataset` binds cases to a `datasets/*.jsonl` file instead of generating them; malformed rows name file and line. `assay init` scaffolds an example so the format is discoverable |
-| Regenerate a single check | **Partial** | Emits a contract-correct scaffold that fails explicitly until codegen lands |
+| Regenerate a single check | **Built** | Runs the same generate/validate/dry-run gate; a failed regeneration creates no version rather than persisting something broken. With no builder model configured it stores a contract-correct scaffold naming that reason |
 
 ## Target adapters
 
 | Adapter | Status | Note |
 |---|---|---|
-| `mock` | **Built** | For tests and the offline example only |
+| `mock` | **Built** | Test fixture only. Resolves solely under `ASSAY_ALLOW_MOCK=1` or an explicit `--offline`; anywhere else it is refused with a message naming what to configure instead, because a green report from a mock is evidence of nothing |
 | `rest` | **Built** | Imports Postman collections (nested folders, named requests, disabled headers dropped, collection variables and auth) and OpenAPI 3 documents in JSON or YAML, through the same parser the builder grounds on (`generator/interface.py`). Variable substitution, bearer auth |
 | `anthropic` | **Built** | |
 | `openai_compat` | **Built** | Honours a per-target `key_env`; `key_env: ""` opts a keyless local server (vLLM, LM Studio) out of auth entirely |
@@ -65,9 +65,9 @@ disagrees with this page, this page is right and the other is a bug.
 | Isolated subprocess, CPU/memory rlimits, wall-clock timeout | **Built** | POSIX only; rlimits no-op elsewhere |
 | Import allowlist, `open`/`exec`/`eval`/`compile` removed | **Built** | Installed before the module body executes (fixed 2026-08-04) |
 | Socket factories patched | **Built** | Defence in depth, not an egress block |
-| Filesystem isolation | **Planned** | The subprocess inherits the engine's working directory. There is no chroot, namespace, or temp-dir jail |
-| OS-level network deny-all | **Planned** | |
-| Hardened tier (gVisor / Firecracker / WASM) | **Planned** | |
+| Filesystem isolation | **Built** | The child runs in a throwaway cwd with an empty environment, and the source is read by the parent so the child never needs `open`. Not a chroot: a check that defeated the import allowlist could still address absolute paths |
+| OS-level network deny-all | **Partial** | A network namespace with no interfaces where unprivileged `unshare` works (Linux with user namespaces). Elsewhere it falls back to patched socket factories behind the import allowlist. `sandbox_tier()` reports which applies |
+| Hardened tier (gVisor / Firecracker / WASM) | **Planned** | For genuinely untrusted third-party code; run Assay inside your own VM or container boundary until then |
 
 ## Engine and runs
 
@@ -76,7 +76,7 @@ disagrees with this page, this page is right and the other is a bug.
 | Execute a run, capture full request + response per case | **Built** | |
 | Case-level gating (all required checks pass) | **Built** | |
 | Run-level / suite-level gating | **Planned** | `Spec.gating` is parsed (`spec/models.py:57`) and never read; `engine/gating.py:10` is dead code; suite-level `gate:` is silently discarded |
-| Token and cost capture | **Planned** | No columns on `CaseResult`; `Run.total_cost_usd` is always 0 |
+| Token and cost capture | **Built** | Per-case tokens and cost on `CaseResult`, judge spend attributed to the case that caused it (including every self-consistency sample). An unpriced model records NULL and renders as "unknown", never as $0.00 — free and unknown are different answers. Price table overridable via `ASSAY_PRICING_FILE` |
 | Regression vs. the last approved run | **Planned** | |
 | Run progress | **Partial** | A browser run returns immediately and polls a done/total progress view; no cancel, and runs execute on an in-process background thread rather than a queue |
 | Scheduler / `assay watch` | **Planned** | |
@@ -85,7 +85,7 @@ disagrees with this page, this page is right and the other is a bug.
 
 | Capability | Status | Note |
 |---|---|---|
-| `pending → ready_for_review → done` state machine | **Built** | Including the back-edge to `pending` |
+| `pending → ready_for_review → done` state machine | **Built** | Forward transitions only. `ready_for_review → pending` is declared legal in `engine/review.py:15` but nothing calls `_transition` with it, so a reviewer cannot return a report for rework |
 | Automation may reach `ready_for_review`, never `done` | **Built** | Structurally enforced (`engine/review.py`) |
 | Per-case adjudication with reviewer override | **Built** | |
 | Reviewer assignment | **Built** | |
