@@ -5,6 +5,7 @@ import os
 import time
 import requests
 from ..llm.provider import key_env_for, read_key
+from ..pricing import estimate_cost, normalise_usage
 from .base import ModelRequest, ModelResponse, parse_structured
 
 
@@ -108,17 +109,23 @@ class OpenAICompatAdapter:
             if fallback_from:
                 raw["_assay_structured_fallback_from"] = fallback_from[:300]
         text = _content(raw)
+        reported = raw.get("usage") or {}
+        # Normalised here so every caller reads one shape; the server's own payload
+        # survives untouched in `raw`. cost_usd stays None for a model we cannot price,
+        # which is the common case behind a self-hosted or gateway endpoint.
+        usage = normalise_usage(self.name, reported)
+        cost = estimate_cost(self.name, self.model, reported)
         if not schema:
             return ModelResponse(text=text, raw=raw, json=_maybe_json(text or ""),
-                                 latency_ms=latency, usage=raw.get("usage", {}),
+                                 latency_ms=latency, usage=usage, cost_usd=cost,
                                  status="ok" if r.ok else "error")
         if not r.ok:
             return ModelResponse(text=text, raw=raw, latency_ms=latency,
-                                 usage=raw.get("usage", {}), status="error",
+                                 usage=usage, cost_usd=cost, status="error",
                                  error=f"openai_compat request failed (HTTP {r.status_code})")
         parsed, err = parse_structured(text, schema, provider="openai_compat")
         return ModelResponse(text=text, raw=raw, json=parsed, latency_ms=latency,
-                             usage=raw.get("usage", {}),
+                             usage=usage, cost_usd=cost,
                              status="error" if err else "ok", error=err)
 
     def complete(self, messages, *, schema=None, tools=None, params=None) -> ModelResponse:

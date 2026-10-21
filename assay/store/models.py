@@ -108,6 +108,13 @@ class CaseResult(Base):
     checks: Mapped[list] = mapped_column(JSON, default=list)
     passed: Mapped[bool] = mapped_column(Boolean, default=False)
     latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
+    # Token and cost columns (P5). All nullable, and NULL means "not known" -- a model
+    # missing from the price table, or a run recorded before this existed. A local
+    # model that really is free stores 0.0, so the two never blur together.
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    judge_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Adjudication columns (Phase 5)
     human_verdict: Mapped[str | None] = mapped_column(String(10), nullable=True)
     overridden_by: Mapped[str | None] = mapped_column(String(120), nullable=True)

@@ -6,7 +6,12 @@ returns it verbatim. Used by the example suite and the test harness.
 from __future__ import annotations
 import json
 import time
+from ..pricing import estimate_cost, normalise_usage
 from .base import ModelRequest, ModelResponse
+
+# In-process and therefore genuinely free -- 0.0, never None. `estimate_cost` owns that
+# call so "free" and "unpriced" cannot drift apart between adapters.
+_USAGE = {"input_tokens": 0, "output_tokens": 0}
 
 
 class MockAdapter:
@@ -34,8 +39,8 @@ class MockAdapter:
         latency = (time.perf_counter() - t0) * 1000 + req.params.get("_mock_latency_ms", 5.0)
         return ModelResponse(
             text=text, raw=body, json=body if isinstance(body, dict) else None,
-            latency_ms=latency, usage={"input_tokens": 0, "output_tokens": 0},
-            cost_usd=0.0, status="ok",
+            latency_ms=latency, usage=normalise_usage(self.name, _USAGE),
+            cost_usd=estimate_cost(self.name, None, _USAGE), status="ok",
         )
 
 
@@ -55,7 +60,8 @@ class MockJudge:
             verdict = {"scores": {}, "rationale": "mock judge: no model configured",
                        "evidence_quotes": []}
         return ModelResponse(text=json.dumps(verdict), raw=verdict, json=verdict, status="ok",
-                             usage={"input_tokens": 0, "output_tokens": 0}, cost_usd=0.0)
+                             usage=normalise_usage(self.name, _USAGE),
+                             cost_usd=estimate_cost(self.name, None, _USAGE))
 
 
 def _from_schema(schema: dict) -> dict:

@@ -17,6 +17,7 @@ _TYPE_MAP = {
     "timestamp": {"sqlite": "DATETIME", "postgresql": "TIMESTAMP"},
     "text": {"sqlite": "TEXT", "postgresql": "TEXT"},
     "int": {"sqlite": "INTEGER", "postgresql": "INTEGER"},
+    "float": {"sqlite": "REAL", "postgresql": "DOUBLE PRECISION"},
 }
 
 
@@ -55,6 +56,14 @@ def _migrate():
     _add_columns("runs", [
         ("cases_total", "int"),
         ("error", "text"),
+    ])
+    # Cases predating token capture read NULL, which the reports render as "unknown"
+    # rather than as $0.00 -- see assay/pricing.py.
+    _add_columns("case_results", [
+        ("input_tokens", "int"),
+        ("output_tokens", "int"),
+        ("judge_tokens", "int"),
+        ("cost_usd", "float"),
     ])
 
 

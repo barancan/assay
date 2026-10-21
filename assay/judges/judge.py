@@ -77,7 +77,11 @@ def run_judge_check(provider: JudgeProvider, rubric: str | Path | dict, response
 
     schema = doc.get("output_schema") or VERDICT_SCHEMA
     user = _build_prompt(dims, response, context)
-    verdicts = [_ask(provider, user, schema) for _ in range(n)]
+    # Every sample is a billed call, so spend is summed over all n, not just the one
+    # whose verdict happens to win the median.
+    sampled = [_ask(provider, user, schema) for _ in range(n)]
+    verdicts = [v for v, _ in sampled]
+    spend = _spend([r for _, r in sampled])
 
     per_dim = _collect_scores(dims, verdicts)
     scores, consistency = _reduce(per_dim)
@@ -109,6 +113,11 @@ def run_judge_check(provider: JudgeProvider, rubric: str | Path | dict, response
                 + "; ".join(repr(q[:80]) for q in fabricated[:3]))
     if consistency is not None:
         evidence["consistency"] = consistency
+    # Also under `evidence` because that is the only field `checks.base.from_raw`
+    # carries onto a CheckResult, and the engine attributes judge spend to a case by
+    # reading it back off the check it ran. The top-level keys are the contract for
+    # callers holding this dict directly.
+    evidence["cost"] = spend
 
     passed = not failures
     return {
@@ -117,6 +126,9 @@ def run_judge_check(provider: JudgeProvider, rubric: str | Path | dict, response
         "severity": "info" if passed else "warn",
         "message": _message(verdicts, failures),
         "evidence": evidence,
+        "usage": {"input_tokens": spend["input_tokens"],
+                  "output_tokens": spend["output_tokens"]},
+        "cost_usd": spend["usd"],
     }
 
 
@@ -194,14 +206,32 @@ def _build_prompt(dims: list[dict], response: dict, context: dict) -> str:
     )
 
 
-def _ask(provider: JudgeProvider, user: str, schema: dict) -> dict:
+def _ask(provider: JudgeProvider, user: str, schema: dict) -> tuple[dict, ModelResponse]:
+    """One judge call. The raw response comes back too, so its cost can be attributed."""
     out: ModelResponse = provider.complete(
         [{"role": "user", "content": user}],
         schema=schema,
         params={"system": _SYS, "temperature": 0.0})
     # Schema path first; the text fallback is for adapters not yet returning `json`.
     verdict = out.json if isinstance(out.json, dict) else _safe(out.text)
-    return verdict if isinstance(verdict, dict) else {}
+    return (verdict if isinstance(verdict, dict) else {}), out
+
+
+def _spend(responses: list[ModelResponse]) -> dict:
+    """Tokens and dollars across every sample taken for one judge check.
+
+    `usd` is None when any single call could not be priced. Summing only the calls we
+    can price would read as a complete total and quietly understate the bill, which is
+    the failure mode this whole feature exists to remove.
+    """
+    costs = [getattr(r, "cost_usd", None) for r in responses]
+    usable = [r.usage if isinstance(getattr(r, "usage", None), dict) else {} for r in responses]
+    return {
+        "usd": None if any(c is None for c in costs) else round(sum(costs), 10),
+        "input_tokens": sum(_as_int(u.get("input_tokens"), 0) for u in usable),
+        "output_tokens": sum(_as_int(u.get("output_tokens"), 0) for u in usable),
+        "samples": len(responses),
+    }
 
 
 def _collect_scores(dims: list[dict], verdicts: list[dict]) -> dict[str, list[int]]:

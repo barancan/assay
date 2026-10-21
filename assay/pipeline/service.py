@@ -230,11 +230,84 @@ def update_step_reached(version_id: int, step: str) -> None:
         pv.step_reached = step
 
 
-def regenerate_check(version_id: int, check_path: str, actor: str) -> int:
+class CodegenError(ValueError):
+    """Codegen ran and could not produce a usable check.
+
+    Carries the attempt count and every attempt's errors, so the caller can tell the
+    reviewer what the model actually got wrong rather than "regeneration failed".
+    """
+
+    def __init__(self, message: str, *, attempts: int = 0,
+                 errors: list[str] | None = None) -> None:
+        super().__init__(message)
+        self.attempts = attempts
+        self.errors = errors or []
+
+
+def _codegen_context(config: dict, check_path: str) -> tuple[dict, object]:
+    """The intent and interface to regenerate `check_path` against.
+
+    The spec is what survives a build, so the intent is reconstructed from it: the
+    assertion recorded on the check, falling back to the case id. The interface is
+    best-effort -- the file the target was imported from may not exist on this host, and
+    an ungrounded interface still produces a runnable dry-run.
+    """
+    from ..generator.interface import Interface, parse_interface
+
+    intent_id = Path(check_path).stem
+    assertion = ""
+    for suite in (config or {}).get("suites", []):
+        for case in suite.get("cases", []):
+            for chk in case.get("checks", []):
+                if chk.get("uses") == check_path:
+                    assertion = (chk.get("assertion") or case.get("id")
+                                 or assertion or check_path)
+
+    try:
+        iface = parse_interface((config or {}).get("target", {}).get("import"))
+    except Exception:
+        iface = Interface()
+    return {"id": intent_id, "assertion": assertion or intent_id,
+            "how": "generated", "category": "auto"}, iface
+
+
+def _unavailable_scaffold(check_path: str, assertion: str, reason: str) -> str:
+    """What to store when there is no model to generate with at all.
+
+    Still meets the sandbox contract -- a module-level check(response, context) -> dict --
+    so it fails as an honest check verdict rather than as a contract violation, and says
+    why in the message.
+    """
+    return (
+        f"# Check for: {assertion}\n"
+        f"# Not generated: {reason}\n"
+        f"# Configure a builder model in Settings and regenerate, or write the body\n"
+        f"# here via the inline editor on the pipeline review screen.\n"
+        f"def check(response: dict, context: dict) -> dict:\n"
+        f"    return {{\n"
+        f'        "passed": False,\n'
+        f'        "severity": "fail",\n'
+        f'        "message": "check {check_path} was not generated: {reason}",\n'
+        f"    }}\n"
+    )
+
+
+def regenerate_check(version_id: int, check_path: str, actor: str, llm=None) -> int:
     """Clone a draft PipelineVersion with one generated-check source regenerated.
+
+    The source is written by the builder model and put through the same gate as a build:
+    static validation, then a real dry-run in the sandbox against a sample response and
+    against degraded ones, so what lands is known to load, to return a verdict, and to
+    discriminate. A model that cannot get there after its repairs raises CodegenError
+    with the attempts rather than persisting something broken.
+
+    With no builder model configured there is nothing to generate with, so the stored
+    source is a scaffold that fails loudly and names the reason.
 
     Only works on draft versions. Returns the new PipelineVersion id.
     """
+    from ..generator.codegen import generate_check
+
     with session_scope() as s:
         pv = s.get(PipelineVersion, version_id)
         if pv is None:
@@ -246,36 +319,59 @@ def regenerate_check(version_id: int, check_path: str, actor: str) -> int:
         existing = pv.generated_sources or {}
         if check_path not in existing:
             raise ValueError(f"generated check '{check_path}' not found in this version")
-
-        # Find the assertion for this check in config so the stub is meaningful.
-        assertion = ""
-        for suite in (pv.config or {}).get("suites", []):
-            for case in suite.get("cases", []):
-                for chk in case.get("checks", []):
-                    if chk.get("uses") == check_path:
-                        assertion = case.get("id", check_path)
-
-        # The sandbox contract is a module-level check(response, context) -> dict
-        # (see assay/sandbox/runner.py). A stub that does not meet it fails at run
-        # time with "module defines no check(response, context)", so the scaffold
-        # must match the contract exactly and fail loudly until it is filled in.
-        new_source = (
-            f"# Regenerated check: {assertion or check_path}\n"
-            f"# Scaffold only -- LLM codegen is not implemented yet. Edit the body,\n"
-            f"# or replace it via the inline editor on the pipeline review screen.\n"
-            f'def check(response, context):\n'
-            f'    return {{\n'
-            f'        "passed": False,\n'
-            f'        "severity": "fail",\n'
-            f'        "message": "check {check_path} is an unimplemented scaffold",\n'
-            f'    }}\n'
-        )
-        new_sources = {**existing, check_path: new_source}
         pid = pv.pipeline_id
         config = dict(pv.config or {})
         rubrics = dict(pv.rubrics or {})
 
+    intent, iface = _codegen_context(config, check_path)
+
+    if llm is None:
+        from ..llm.provider import LLMConfigError, resolve_builder_llm
+        try:
+            llm = resolve_builder_llm(config.get("project"))
+        except LLMConfigError:
+            llm = None
+
+    if llm is None:
+        new_source = _unavailable_scaffold(
+            check_path, intent["assertion"], "no builder model is configured")
+        dry_run = None
+    else:
+        result = generate_check(intent, iface, llm)
+        if not result.ok:
+            raise CodegenError(
+                f"could not generate a working check for '{check_path}' after "
+                f"{result.attempts} attempt(s): "
+                + "; ".join(result.errors[-3:] or ["no reason recorded"]),
+                attempts=result.attempts, errors=result.errors)
+        new_source = result.source
+        dry_run = result.dry_run
+
+    config = _record_dry_run(config, check_path, dry_run)
+    new_sources = {**existing, check_path: new_source}
     return create_version(pid, config, new_sources, rubrics, actor).id
+
+
+def _record_dry_run(config: dict, check_path: str, dry_run: dict | None) -> dict:
+    """Attach this source's dry-run to build_meta, dropping the previous source's.
+
+    The outcome shown on the review screen has to describe the source that is actually
+    stored. Carrying the old one forward would tell a reviewer that a check they have
+    never seen run had passed.
+    """
+    import copy
+    config = copy.deepcopy(config)
+    meta = config.setdefault("build_meta", {})
+    runs = meta.setdefault("codegen", {})
+    if dry_run is None:
+        runs.pop(check_path, None)
+    else:
+        runs[check_path] = dry_run
+    if not runs:
+        meta.pop("codegen", None)
+    if not meta:
+        config.pop("build_meta", None)
+    return config
 
 
 def update_check_source(version_id: int, check_path: str, source: str) -> None:
@@ -291,6 +387,9 @@ def update_check_source(version_id: int, check_path: str, source: str) -> None:
         sources = dict(pv.generated_sources or {})
         sources[check_path] = source
         pv.generated_sources = sources
+        # The recorded dry-run described the source that was just replaced. Drop it
+        # rather than let the review screen vouch for code nobody ran.
+        pv.config = _record_dry_run(dict(pv.config or {}), check_path, None)
 
 
 def get_version(version_id: int) -> PipelineVersion | None:

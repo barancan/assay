@@ -29,6 +29,12 @@ import os
 import sys
 from pathlib import Path
 
+# This example is a walkthrough of the review flow, not an evaluation: the target and the
+# judge are both mocks, so every check passes by construction and the report is green
+# about nothing. Assay refuses mock adapters unless someone opts in, and opting in is
+# what this line does -- deliberately, in the one place where the mock is the point.
+os.environ.setdefault("ASSAY_ALLOW_MOCK", "1")
+
 # Resolve the spec path relative to this script so the script can be run
 # from any working directory.
 _HERE = Path(__file__).parent

@@ -4,20 +4,11 @@
 <div style="margin-bottom:.75rem">
   <label style="display:block;font-size:13px;font-weight:500;margin-bottom:.3rem">Adapter</label>
   <select x-model="adapter" style="width:100%;max-width:18rem">
-    <option value="mock">mock (offline, no keys)</option>
     <option value="anthropic">anthropic</option>
     <option value="openai_compat">OpenAI-compatible</option>
     <option value="ollama">ollama (local)</option>
     <option value="rest">REST / HTTP</option>
   </select>
-</div>
-
-<!-- mock: no fields needed -->
-<div id="adapter-mock-fields" x-show="adapter === 'mock'">
-  <p style="font-size:13px;color:var(--text-muted)">
-    <i class="ti ti-info-circle" aria-hidden="true"></i>
-    Mock adapter runs offline with no API keys required.
-  </p>
 </div>
 
 <!-- Base URL (openai_compat, ollama, rest) -->

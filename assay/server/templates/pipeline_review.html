@@ -104,6 +104,11 @@
     {% elif chk.type == 'judge' and chk.key %}
       <code style="font-size:12px;color:var(--text-secondary)">{{ chk.key }}</code>
     {% endif %}
+    {% if chk.codegen_fallback %}
+      <span class="badge badge-warning" title="A mechanical check was wanted here and could not be written.">
+        <i class="ti ti-alert-triangle" aria-hidden="true"></i> fell back from generated
+      </span>
+    {% endif %}
   </div>
 
   {% if chk.assertion %}
@@ -118,8 +123,61 @@
     </div>
   {% endif %}
 
+  {% if chk.codegen_fallback %}
+  <div style="margin:.4rem 0 .5rem;padding:.5rem .65rem;border:1px solid var(--border-warning);
+              background:var(--bg-warning);border-radius:var(--radius)">
+    <p style="margin:0 0 .3rem;font-size:13px;color:var(--text-warning)">
+      <strong>This assertion asked for a generated check.</strong>
+      Codegen could not produce one after
+      {{ chk.codegen_fallback.attempts }} attempt{{ 's' if chk.codegen_fallback.attempts != 1 }},
+      so it is being judged semantically instead of tested mechanically.
+    </p>
+    {% if chk.codegen_fallback.assertion %}
+    <p style="margin:0 0 .3rem;font-size:13px;color:var(--text-primary)">
+      {{ chk.codegen_fallback.assertion }}
+    </p>
+    {% endif %}
+    {% if chk.codegen_fallback.errors %}
+    <details>
+      <summary style="font-size:12px;color:var(--text-warning)">Why it failed</summary>
+      <ul style="margin:.35rem 0 0 1rem;font-size:12px;color:var(--text-secondary)">
+        {% for err in chk.codegen_fallback.errors %}
+        <li>{{ err }}</li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
+  </div>
+  {% endif %}
+
   {% if chk.type == 'generated' %}
   <div x-data="{ editing: false }" style="margin-top:.5rem">
+    {% if chk.dry_run %}
+    <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.4rem">
+      {% if chk.dry_run.passed %}
+        <span class="badge badge-pass"><i class="ti ti-circle-check" aria-hidden="true"></i> dry run passed</span>
+      {% else %}
+        <span class="badge badge-fail"><i class="ti ti-circle-x" aria-hidden="true"></i> dry run failed</span>
+      {% endif %}
+      {% if chk.dry_run.discriminates %}
+        <span class="badge badge-neutral" title="It also rejected a deliberately degraded response, so it is testing something.">
+          rejects a bad response
+        </span>
+      {% elif chk.dry_run.discriminates is not none %}
+        <span class="badge badge-warning" title="It passed a degraded response too — it may not be testing anything.">
+          does not discriminate
+        </span>
+      {% endif %}
+      {% if chk.dry_run.message %}
+        <span style="font-size:12px;color:var(--text-muted)">{{ chk.dry_run.message }}</span>
+      {% endif %}
+    </div>
+    {% elif chk.source %}
+    <p style="font-size:12px;color:var(--text-muted);margin:0 0 .4rem">
+      No dry-run recorded for this source — it was written or edited by hand.
+    </p>
+    {% endif %}
+
     {% if chk.source %}
     <details>
       <summary style="font-size:13px">

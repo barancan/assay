@@ -41,7 +41,9 @@ def init(path: str = typer.Argument(".", help="project directory")):
 @app.command()
 def generate(
     requirements: str = typer.Option("requirements.md"),
-    target_adapter: str = typer.Option("mock", "--adapter"),
+    target_adapter: str = typer.Option(None, "--adapter",
+                                       help="anthropic|openai_compat|ollama|rest "
+                                            "(mock only with --offline)"),
     target_import: str = typer.Option(None, "--import"),
     interface: str = typer.Option(None, "--interface",
                                   help="Postman/OpenAPI/MCP file to ground case "
@@ -67,7 +69,7 @@ def generate(
     assay.yaml + generated/ to disk (eval-as-code, commit to git).
     Use --to-db to store as a draft PipelineVersion in the DB instead.
     """
-    target = {"adapter": target_adapter}
+    target = {"adapter": _resolve_target_adapter(target_adapter, offline)}
     if target_import:
         target["import"] = target_import
     if request:
@@ -80,8 +82,9 @@ def generate(
     elif iface_path:
         console.print(f"[cyan]case inputs grounded on[/] {iface_path}")
 
-    # A missing interface or dataset file, or a model reply that cannot become a
-    # pipeline, is a message the user can act on -- not a traceback.
+    # A missing interface or dataset file, a model reply that cannot become a pipeline,
+    # or graded checks with no judge, is a message the user can act on -- not a traceback.
+    from .llm.provider import LLMConfigError
     try:
         if to_db:
             from .store.db import init_db
@@ -96,7 +99,7 @@ def generate(
             path = build_pipeline(requirements, target, out, judge=judge_obj,
                                   judges=judges, project=project, allow_heuristic=offline,
                                   interface_path=interface, dataset=dataset)
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, LLMConfigError) as e:
         console.print(f"[red]{e}[/]")
         raise typer.Exit(1)
 
@@ -107,6 +110,38 @@ def generate(
     else:
         console.print(f"[green]pipeline written[/] {path}")
         console.print("[yellow]review generated/ before running in production[/]")
+    if offline:
+        from .adapters.registry import ALLOW_MOCK_ENV
+        console.print(f"[yellow]this pipeline targets the mock adapter; to execute it "
+                      f"set {ALLOW_MOCK_ENV}=1[/]")
+
+
+_OFFLINE_JUDGES = {"primary": {"provider": "mock", "model": "mock"}}
+
+
+def _resolve_target_adapter(adapter: str | None, offline: bool) -> str:
+    """The target adapter for `assay generate`, or a message saying how to pick one.
+
+    `mock` used to be the default here, so the easiest thing a new user could do was
+    build a pipeline that evaluates nothing. It is now reachable only through --offline,
+    which is the documented no-keys path and says what it is on the tin.
+    """
+    if adapter is None:
+        if offline:
+            return "mock"
+        console.print("[red]--adapter is required[/] — anthropic, openai_compat, ollama "
+                      "or rest.")
+        console.print("[yellow]No provider set up yet? `assay generate --offline` builds "
+                      "the mock demo pipeline; its results are not evidence of "
+                      "anything.[/]")
+        raise typer.Exit(1)
+    if adapter == "mock" and not offline:
+        console.print("[red]--adapter mock is a test fixture, not a target[/] — it passes "
+                      "every check, so the report is green and means nothing.")
+        console.print("[yellow]Use a real adapter (anthropic, openai_compat, ollama, "
+                      "rest), or add --offline if you want the mock demo pipeline.[/]")
+        raise typer.Exit(1)
+    return adapter
 
 
 def _resolve_build_model(judge: str | None, offline: bool, project: str):
@@ -115,14 +150,18 @@ def _resolve_build_model(judge: str | None, offline: bool, project: str):
     --offline is the only way to build without a model; everything else resolves a real
     one and fails with the missing variable's name rather than degrading silently.
     """
-    from .llm.provider import LLMConfigError, credential_status, resolve_builder_llm
+    from .llm.provider import (LLMConfigError, builder_choice, credential_status,
+                               resolve_builder_llm)
     if offline:
         if judge:
             console.print("[red]--offline and --judge are mutually exclusive[/]")
             raise typer.Exit(1)
         console.print("[yellow]offline build: intents come from the keyword heuristic, "
-                      "not a model[/]")
-        return None, None
+                      "not a model, and graded checks are scored by a mock judge that "
+                      "passes everything. Do not read the result as evidence.[/]")
+        # Named here rather than substituted deep in the builder, so the mock judge is
+        # visible in the assay.yaml the user is asked to review.
+        return None, dict(_OFFLINE_JUDGES)
     if judge:
         if ":" not in judge:
             console.print(f"[red]--judge must be provider:model[/] — got {judge!r}. "
@@ -147,7 +186,11 @@ def _resolve_build_model(judge: str | None, offline: bool, project: str):
         return (get_judge_provider(JudgeSpec(provider=prov, model=model)),
                 {"primary": {"provider": prov, "model": model}})
     try:
-        return resolve_builder_llm(project), None
+        llm = resolve_builder_llm(project)
+        # Name the workspace's own model as the judge. Leaving this empty is what used
+        # to hand the graded checks to a mock judge further down the build.
+        prov, model = builder_choice(project)
+        return llm, {"primary": {"provider": prov, "model": model}}
     except LLMConfigError as e:
         console.print(f"[red]{e}[/]")
         console.print("[yellow]set the variable above, pass --judge provider:model, "
@@ -163,8 +206,15 @@ def run(spec: str = typer.Option("assay.yaml"),
     from .spec.loader import load_spec
     from .engine import execute_run, submit_for_review
     from .reporting import export_report
+    from .llm.provider import LLMConfigError
     sp = load_spec(spec)
-    run_id = execute_run(sp, trigger=trigger, triggered_by=by)
+    # An unusable target is a configuration problem with a written-out fix. A traceback
+    # buries that message under a stack, which is where it helps nobody.
+    try:
+        run_id = execute_run(sp, trigger=trigger, triggered_by=by)
+    except (LLMConfigError, ConnectionError) as e:
+        console.print(f"[red]{e}[/]")
+        raise typer.Exit(1)
     submit_for_review_id(run_id, by)
     paths = export_report(run_id)
     console.print(f"[green]run {run_id} complete[/] -> report state: ready_for_review")
@@ -232,16 +282,20 @@ def approve(report_id: int, approver: str = typer.Option(...),
 
 @target_app.command("ping")
 def target_ping(
-    adapter: str = typer.Option("mock", "--adapter", help="mock|rest|anthropic|openai_compat|ollama"),
+    adapter: str = typer.Option(..., "--adapter", help="rest|anthropic|openai_compat|ollama"),
     endpoint: str = typer.Option(None, "--endpoint", help="target endpoint URL"),
     model: str = typer.Option(None, "--model", help="model name"),
 ):
     """Test connectivity to a target adapter."""
     from .spec.models import TargetSpec
     from .adapters import get_target_adapter
-    from .adapters.registry import test_connection
+    from .llm.provider import LLMConfigError
     spec = TargetSpec(adapter=adapter, endpoint=endpoint, model=model)
-    tgt = get_target_adapter(spec)
+    try:
+        tgt = get_target_adapter(spec)
+    except (LLMConfigError, ValueError) as e:
+        console.print(f"[red]{e}[/]")
+        raise typer.Exit(1)
     result = tgt.ping()
     if result["ok"]:
         console.print(f"[green]ok[/] latency {result['latency_ms']:.1f} ms")

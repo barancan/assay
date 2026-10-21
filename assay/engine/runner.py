@@ -205,26 +205,38 @@ def _execute_cases(ctx: _RunContext) -> None:
         for case in suite.cases:
             req = ModelRequest(input=case.input, params=spec.target.params)
             resp = target.invoke(req)
-            total_cost += resp.cost_usd or 0.0
             rdict = resp.as_dict()
             cctx = {"input": case.input, "suite": suite.id, "case": case.id}
             results: list[CheckResult] = [
                 run_check(c, rdict, cctx, judges) for c in case.checks]
             ok = case_passed(results)
             case_flags.append(ok)
+            # A case costs what the target charged plus every judge call it provoked.
+            # Judges were previously invisible, which mattered more once a rubric could
+            # take several samples per check.
+            judge = _judge_spend(results)
+            case_cost = _combine(resp.cost_usd, judge["usd"])
+            total_cost += case_cost or 0.0
             with session_scope() as s:
                 s.add(CaseResult(
                     run_id=ctx.run_id, suite_id=suite.id, case_id=case.id,
                     requirement_ref=suite.requirement_ref,
                     request={"input": case.input}, response=rdict,
                     checks=[r.to_dict() for r in results], passed=ok,
-                    latency_ms=resp.latency_ms))
+                    latency_ms=resp.latency_ms,
+                    input_tokens=resp.usage.get("input_tokens"),
+                    output_tokens=resp.usage.get("output_tokens"),
+                    judge_tokens=judge["tokens"],
+                    cost_usd=case_cost))
 
     with session_scope() as s:
         run = s.get(Run, ctx.run_id)
         run.status = "complete"
         run.finished_at = dt.datetime.now(dt.timezone.utc)
-        run.total_cost_usd = total_cost
+        # Sum of the cases we could price. The column is non-nullable, so a run
+        # containing unpriced cases reports a lower bound; the reports say how many
+        # cases are unaccounted for rather than letting the number pass as complete.
+        run.total_cost_usd = round(total_cost, 10)
 
         summary = {"cases": len(case_flags), "passed": sum(case_flags),
                    "failed": len(case_flags) - sum(case_flags)}
@@ -234,6 +246,35 @@ def _execute_cases(ctx: _RunContext) -> None:
         s.add(StateTransition(report_id=report.id, from_state=None,
                               to_state="pending", actor=ctx.triggered_by,
                               note="run created"))
+
+
+def _judge_spend(results: list[CheckResult]) -> dict:
+    """Total judge tokens and dollars behind one case's checks.
+
+    `run_judge_check` records its spend under `evidence["cost"]` -- the only field that
+    survives onto a CheckResult -- so this is where a judge call gets attributed to the
+    case that caused it. `usd` is None if any judge call could not be priced.
+    """
+    tokens = 0
+    usd: float | None = 0.0
+    for r in results:
+        # Judge checks only. A generated check is model-written code returning arbitrary
+        # evidence, so an untrusted `cost` key must not be able to move the run total.
+        if r.type != "judge":
+            continue
+        cost = (r.evidence or {}).get("cost")
+        if not isinstance(cost, dict):
+            continue
+        tokens += int(cost.get("input_tokens") or 0) + int(cost.get("output_tokens") or 0)
+        usd = _combine(usd, cost.get("usd"))
+    return {"tokens": tokens, "usd": usd}
+
+
+def _combine(*costs: float | None) -> float | None:
+    """Add costs, where one unknown makes the total unknown rather than smaller."""
+    if any(c is None for c in costs):
+        return None
+    return round(sum(costs), 10)
 
 
 def _mark_run_failed(run_id: int, exc: Exception) -> None:

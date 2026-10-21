@@ -17,7 +17,7 @@
   requirements: {{ (resume_data.requirements if resume_data else '') | tojson }},
   project: {{ (resume_data.project if resume_data else project_default) | tojson }},
   name: {{ (resume_data.name if resume_data else '') | tojson }},
-  adapter: {{ (resume_data.adapter if resume_data else 'mock') | tojson }},
+  adapter: {{ (resume_data.adapter if resume_data else adapter_names[0]) | tojson }},
   model: {{ (resume_data.model if resume_data else '') | tojson }},
   endpoint: {{ (resume_data.endpoint if resume_data else '') | tojson }},
   key_env: {{ (resume_data.key_env if resume_data else '') | tojson }},
@@ -90,6 +90,11 @@
                      // rejected by the spec model rather than silently dropped.
                      import: this.interfaceFile.trim() || null}
     };
+    // The form has always collected these two and then dropped them, so graded checks
+    // fell through to a mock judge that passes everything. Send them.
+    if (this.judgeAdapter && this.judgeModel) {
+      payload.judge_spec = {provider: this.judgeAdapter, model: this.judgeModel};
+    }
     if (this.resumeVersionId) payload.pipeline_version_id = this.resumeVersionId;
     if (this.resumePipelineId) payload.pipeline_id = this.resumePipelineId;
     try {

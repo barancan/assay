@@ -1,16 +1,21 @@
 """FastAPI review server for the Assay workflow.
 
-Identity resolution order:
-  1. Signed session cookie 'assay_user' (set by POST /login)
-  2. X-Assay-User request header (API / CLI / CI callers)
-  3. 'anonymous' fallback
+Identity, for a privileged action:
+  1. Signed session cookie 'assay_user' (set by POST /login) -- always sufficient
+  2. X-Assay-User header, which is an assertion rather than a credential. Accepted
+     alone in open mode; in enforced mode it must carry a matching X-Assay-Token
+     (ASSAY_API_TOKEN), because a bare header would let any caller name a reviewer
+     and approve a report
+  3. Otherwise: 'anonymous' in open mode, 401 in enforced mode
 
-Reviewer/admin authority is checked by the engine layer; the server just
-resolves and forwards the actor name.
+Reviewer/admin authority is checked by the engine layer; the server resolves and
+forwards the actor name, and is responsible for the actor being genuine.
 """
 from __future__ import annotations
 import json
 import os
+import secrets
+from pathlib import Path
 from fastapi import FastAPI, Header, HTTPException, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -42,30 +47,65 @@ templates.env.filters["urlencode"] = lambda s: _urlquote(str(s), safe="")
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
 
-def _identity(request: Request) -> str:
-    """Resolve identity for display purposes. Always returns a string."""
+def _cookie_identity(request: Request) -> str | None:
+    """Identity proven by the signed session cookie, or None."""
     from itsdangerous import URLSafeSerializer, BadSignature
     cookie = request.cookies.get("assay_user")
-    if cookie:
-        try:
-            return URLSafeSerializer(_config.secret_key()).loads(cookie)
-        except (BadSignature, Exception):
-            pass
-    header = request.headers.get("x-assay-user")
-    if header:
-        return header
-    return "anonymous"
+    if not cookie:
+        return None
+    try:
+        return URLSafeSerializer(_config.secret_key()).loads(cookie)
+    except (BadSignature, Exception):
+        return None
+
+
+def _identity(request: Request) -> str:
+    """Resolve identity for display purposes. Always returns a string.
+
+    Display only. An unproven header is good enough to render a name in the corner of a
+    page; it is not good enough to act on -- see _require_identity.
+    """
+    return _cookie_identity(request) or request.headers.get("x-assay-user") or "anonymous"
 
 
 def _require_identity(request: Request, x_assay_user: str | None = None) -> str:
-    """Resolve identity for privileged actions; 401 in enforced mode if not authenticated."""
-    actor = x_assay_user or _identity(request)
-    if _config.auth_mode() == "enforced" and actor == "anonymous":
+    """Resolve identity for a privileged action, or raise 401.
+
+    `X-Assay-User` is an assertion, not a credential: anyone who can reach the port can
+    send one. In open mode that is fine and deliberate -- a single developer on
+    localhost. In enforced mode it is not, because naming a seeded reviewer would let
+    any caller approve a report and make the approval gate decorative. So enforced mode
+    accepts the header only when it is accompanied by `X-Assay-Token` matching
+    ASSAY_API_TOKEN, and rejects it outright when no token is configured. The signed
+    session cookie is always sufficient on its own.
+    """
+    header_user = x_assay_user or request.headers.get("x-assay-user")
+    cookie_user = _cookie_identity(request)
+
+    if _config.auth_mode() != "enforced":
+        return header_user or cookie_user or "anonymous"
+
+    if cookie_user:
+        return cookie_user
+
+    if not header_user:
         raise HTTPException(
             401,
-            detail="authentication required: log in at /login or set X-Assay-User header",
+            detail="authentication required: log in at /login, or send X-Assay-User "
+                   "with a matching X-Assay-Token",
         )
-    return actor
+
+    expected = _config.api_token()
+    if not expected:
+        raise HTTPException(
+            401,
+            detail="X-Assay-User is not accepted in enforced mode until ASSAY_API_TOKEN "
+                   "is set on the server; log in at /login instead",
+        )
+    presented = request.headers.get("x-assay-token") or ""
+    if not secrets.compare_digest(presented, expected):
+        raise HTTPException(401, detail="X-Assay-Token is missing or incorrect")
+    return header_user
 
 
 def _is_htmx(request: Request) -> bool:
@@ -129,6 +169,10 @@ def _report_ctx(report_id: int, request: Request) -> dict:
                     "human_verdict": cr.human_verdict,
                     "overridden_by": cr.overridden_by,
                     "effective_passed": cr.effective_passed,
+                    "input_tokens": cr.input_tokens,
+                    "output_tokens": cr.output_tokens,
+                    "judge_tokens": cr.judge_tokens,
+                    "cost_usd": cr.cost_usd,
                 }
                 for cr in cases
             ],
@@ -260,7 +304,10 @@ _METRIC_CATALOGUE = [
     # quality
     {"id": "task_completion",   "label": "Task completion",    "determinism": "stochastic",    "category": "quality",     "default_threshold": 0.80, "text": "The response fully completes the requested task."},
 ]
-_ADAPTER_NAMES = ["mock", "anthropic", "openai_compat", "ollama", "rest"]
+# No "mock": it is a test fixture, and offering it here is how a user ends up with a
+# green report about nothing. It stays reachable via ASSAY_ALLOW_MOCK for the test suite
+# and the offline example.
+_ADAPTER_NAMES = ["anthropic", "openai_compat", "ollama", "rest"]
 
 
 @app.get("/pipelines/new", response_class=HTMLResponse)
@@ -285,7 +332,7 @@ def pipeline_new_page(request: Request, resume: int | None = None, project: str 
                     "step_reached": pv.step_reached or "define",
                     "project": pipe.project if pipe else "",
                     "name": pipe.name if pipe else "",
-                    "adapter": target.get("adapter") or "mock",
+                    "adapter": target.get("adapter") or _ADAPTER_NAMES[0],
                     "model": target.get("model") or "",
                     "endpoint": target.get("endpoint") or "",
                     "key_env": target.get("key_env") or "",
@@ -431,6 +478,7 @@ def pipeline_generate(
 ):
     import yaml
     from ..generator.build import cases_for_intents, intents_to_spec, resolve_interface, rubric_for
+    from ..llm.provider import LLMConfigError
     from ..pipeline import create_version
     from ..pipeline.service import update_step_reached, activate_version, update_version_config
     actor = _require_identity(request, x_assay_user)
@@ -447,8 +495,13 @@ def pipeline_generate(
         cases = cases_for_intents(intents, iface, llm)
     except Exception as e:
         raise HTTPException(422, f"could not generate case inputs: {e}"[:200])
-    spec_dict = intents_to_spec(body.project, intents, body.adapter_spec, judges,
-                                iface=iface, cases_by_intent=cases)
+    try:
+        spec_dict = intents_to_spec(body.project, intents, body.adapter_spec, judges,
+                                    iface=iface, cases_by_intent=cases)
+    except LLMConfigError as e:
+        # Graded checks with no judge configured. A 500 here would read as a server bug;
+        # it is a configuration the user can fix in Settings.
+        raise HTTPException(422, _llm_config_detail(e))
     spec_dict["requirements"] = body.requirements  # persist so wizard can restore it
     # Judge checks reference a rubric path; store the rubric alongside so the version is
     # runnable without a disk checkout.
@@ -565,7 +618,11 @@ class JudgeSettingsBody(BaseModel):
 
 
 @app.post("/settings/judge")
-def update_judge_settings(body: JudgeSettingsBody):
+def update_judge_settings(body: JudgeSettingsBody, request: Request,
+                          x_assay_user: str | None = Header(default=None)):
+    # Repointing the workspace's models is a privileged action: it decides which
+    # provider every future build and every judge call goes to, and what it costs.
+    _require_identity(request, x_assay_user)
     with session_scope() as s:
         s.merge(WorkspaceSetting(key="judge_adapter", value=body.judge_adapter))
         s.merge(WorkspaceSetting(key="judge_model", value=body.judge_model))
@@ -587,7 +644,9 @@ class BuilderSettingsBody(BaseModel):
 
 
 @app.post("/settings/builder")
-def update_builder_settings(body: BuilderSettingsBody):
+def update_builder_settings(body: BuilderSettingsBody, request: Request,
+                            x_assay_user: str | None = Header(default=None)):
+    _require_identity(request, x_assay_user)
     with session_scope() as s:
         s.merge(WorkspaceSetting(key="builder_adapter", value=body.builder_adapter))
         s.merge(WorkspaceSetting(key="builder_model", value=body.builder_model))
@@ -937,6 +996,11 @@ def import_pipeline(body: ImportBody):
 def _build_check_list(pv) -> list[dict]:
     """Flatten config.suites[].cases[].checks[] into a list with resolved source/rubric."""
     checks = []
+    # Codegen's own record of the build: the dry-run each generated check passed, and
+    # the intents that wanted a mechanical check and had to settle for a judge.
+    meta = (pv.config or {}).get("build_meta") or {}
+    dry_runs = meta.get("codegen") or {}
+    fallbacks = {f.get("intent_id"): f for f in (meta.get("codegen_failures") or [])}
     for suite in (pv.config or {}).get("suites", []):
         for case in suite.get("cases", []):
             for idx, chk in enumerate(case.get("checks", [])):
@@ -944,13 +1008,20 @@ def _build_check_list(pv) -> list[dict]:
                 key = None
                 source = None
                 rubric_text = None
+                dry_run = None
+                fallback = None
                 if ctype == "generated":
                     key = chk.get("uses", "")
                     source = (pv.generated_sources or {}).get(key, "")
+                    dry_run = dry_runs.get(key)
                 elif ctype == "judge":
                     key = chk.get("rubric", "")
                     rubric_text = (pv.rubrics or {}).get(key, "")
+                    # generated/rubrics/<intent_id>.yaml — the same id codegen recorded.
+                    fallback = fallbacks.get(Path(key).stem) if key else None
                 checks.append({
+                    "dry_run": dry_run,
+                    "codegen_fallback": fallback,
                     "suite_id": suite.get("id", ""),
                     "case_id": case.get("id", ""),
                     "check_index": idx,
@@ -1075,10 +1146,14 @@ def regenerate_check_route(
     request: Request,
     x_assay_user: str | None = Header(default=None),
 ):
-    from ..pipeline.service import regenerate_check
+    from ..pipeline.service import CodegenError, regenerate_check
     actor = _require_identity(request, x_assay_user)
     try:
         new_version_id = regenerate_check(version_id, check_path, actor)
+    except CodegenError as e:
+        # The version is untouched: nothing broken was persisted. 422 rather than 404
+        # so the reviewer sees the model's problem, not a missing-resource error.
+        raise HTTPException(422, str(e))
     except ValueError as e:
         status = 409 if "draft" in str(e) else 404
         raise HTTPException(status, str(e))
@@ -1430,14 +1505,46 @@ class HookBody(BaseModel):
 
 
 @app.post("/hooks/run")
-def hook_run(body: HookBody):
-    """Auto-trigger a run on model/prompt update. Lands at ready_for_review."""
+def hook_run(
+    body: HookBody,
+    request: Request,
+    x_assay_user: str | None = Header(default=None),
+):
+    """Auto-trigger a run on model/prompt update. Lands at ready_for_review.
+
+    This was the only mutating route with no identity resolution, and it read a
+    caller-supplied path off disk. Both are closed: the caller is authenticated like
+    any other privileged action, and the spec must live under the server's working
+    directory so the webhook cannot be used to read arbitrary files.
+    """
     from ..spec.loader import load_spec
     from ..engine import execute_run
-    run_id = execute_run(load_spec(body.spec), trigger="auto", triggered_by=body.by)
+
+    actor = _require_identity(request, x_assay_user)
+
+    root = Path.cwd().resolve()
+    try:
+        spec_path = (root / body.spec).resolve()
+    except OSError as e:
+        raise HTTPException(400, f"bad spec path: {e}")
+    if not spec_path.is_relative_to(root):
+        raise HTTPException(400, "spec must be a path inside the server's working directory")
+    if not spec_path.is_file():
+        raise HTTPException(404, f"spec not found: {body.spec}")
+
+    # `by` is caller-supplied and was written straight into the audit trail. The
+    # authenticated actor is the one that gets recorded; `by` survives only as a label.
+    triggered_by = actor if actor != "anonymous" else (body.by or "webhook")
+    try:
+        run_id = execute_run(load_spec(str(spec_path)), trigger="auto",
+                             triggered_by=triggered_by)
+    except PermissionError as e:
+        raise HTTPException(403, str(e)[:200])
+    except Exception as e:
+        raise HTTPException(422, f"could not run the spec: {e}"[:200])
     with session_scope() as s:
         rep = s.query(Report).filter_by(run_id=run_id).one()
         rep_id = rep.id
-    submit_for_review(rep_id, actor=body.by, note="auto after webhook")
+    submit_for_review(rep_id, actor=triggered_by, note="auto after webhook")
     export_report(run_id)
     return {"ok": True, "run_id": run_id, "report_id": rep_id, "state": "ready_for_review"}
